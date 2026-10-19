@@ -62,7 +62,8 @@ The streamer picks a delivery mode per request (probing with `ffprobe`):
 Remuxed and transcoded responses are live pipes: `200` with no
 `Content-Length`, no byte-range support, and an `X-Flixer-Playback-Mode`
 header. Clients seek by requesting a new URL with `start`. ffmpeg is killed when
-the client disconnects. At most `MAX_TRANSCODES` (default 2) run concurrently;
+the client disconnects. By default there is no limit; set `MAX_TRANSCODES` to cap
+concurrent runs (excess requests wait 10 seconds, then get `503`);
 extra requests get `503 transcoder_busy` with `Retry-After`. If ffmpeg is not
 installed the streamer logs a warning and serves direct play only (`501` when
 `height`/`start` is requested, and for non-direct-playable files `DirectPlay`

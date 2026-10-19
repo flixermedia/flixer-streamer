@@ -197,8 +197,8 @@ func New(ffmpegPath, ffprobePath string, maxConcurrent int, logger *slog.Logger,
 	if _, err := exec.LookPath(ffprobePath); err != nil {
 		return nil, fmt.Errorf("ffprobe not found: %w", err)
 	}
-	if maxConcurrent < 1 {
-		maxConcurrent = 1
+	if maxConcurrent < 0 {
+		maxConcurrent = 0
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -206,14 +206,17 @@ func New(ffmpegPath, ffprobePath string, maxConcurrent int, logger *slog.Logger,
 	if !ValidLogLevel(logLevel) {
 		logLevel = "warning"
 	}
-	return &Transcoder{
+	t := &Transcoder{
 		ffmpegPath:  ffmpegPath,
 		ffprobePath: ffprobePath,
-		slots:       make(chan struct{}, maxConcurrent),
 		sessions:    newRegistry(),
 		logger:      logger,
 		logLevel:    logLevel,
-	}, nil
+	}
+	if maxConcurrent > 0 {
+		t.slots = make(chan struct{}, maxConcurrent)
+	}
+	return t, nil
 }
 
 type probeOutput struct {
@@ -267,15 +270,17 @@ func (t *Transcoder) Stream(parent context.Context, plan Plan, w http.ResponseWr
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
-	select {
-	case t.slots <- struct{}{}:
-		defer func() { <-t.slots }()
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(slotWait):
-		return ErrBusy
+	// A nil slots channel means no limit.
+	if t.slots != nil {
+		select {
+		case t.slots <- struct{}{}:
+			defer func() { <-t.slots }()
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(slotWait):
+			return ErrBusy
+		}
 	}
-
 	var session *handle
 	if !head {
 		var err error
@@ -374,7 +379,7 @@ func (t *Transcoder) Sessions() []SessionInfo { return t.sessions.list() }
 // CancelSession stops a session's ffmpeg processes and blocks it from restarting.
 func (t *Transcoder) CancelSession(id string) bool { return t.sessions.cancel(id) }
 
-// MaxConcurrent returns the configured transcode slot limit.
+// MaxConcurrent returns the configured transcode limit; 0 means unlimited.
 func (t *Transcoder) MaxConcurrent() int { return cap(t.slots) }
 
 // lineLogger turns ffmpeg's stderr lines into structured log records.

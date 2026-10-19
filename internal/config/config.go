@@ -62,9 +62,9 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	maxTranscodes, err := strconv.Atoi(envOrDefault("MAX_TRANSCODES", "2"))
-	if err != nil || maxTranscodes < 1 {
-		return Config{}, errors.New("MAX_TRANSCODES must be a positive integer")
+	maxTranscodes, err := strconv.Atoi(envOrDefault("MAX_TRANSCODES", "0"))
+	if err != nil || maxTranscodes < 0 {
+		return Config{}, errors.New("MAX_TRANSCODES must be a non-negative integer (0 means unlimited)")
 	}
 	ffmpegPath := envOrDefault("FFMPEG_PATH", "ffmpeg")
 	ffmpegLogLevel := strings.ToLower(envOrDefault("FFMPEG_LOG_LEVEL", "info"))
