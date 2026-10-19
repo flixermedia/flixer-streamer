@@ -78,8 +78,38 @@ func TestHealthEndpoint(t *testing.T) {
 	})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	if response.Code != http.StatusOK || response.Body.String() != "{\"status\":\"ok\"}\n" {
+	if response.Code != http.StatusOK || response.Body.String() != "{\"activeTranscodes\":0,\"status\":\"ok\"}\n" {
 		t.Fatalf("health response = %d %q", response.Code, response.Body.String())
+	}
+}
+
+func TestAdminSessionsRequireKey(t *testing.T) {
+	secret := []byte("test-secret-that-is-at-least-thirty-two-bytes")
+	handler := NewHandler(Options{
+		Secret: secret,
+		Logger: slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil)),
+	})
+
+	denied := httptest.NewRecorder()
+	handler.ServeHTTP(denied, httptest.NewRequest(http.MethodGet, "/admin/sessions", nil))
+	if denied.Code != http.StatusUnauthorized {
+		t.Fatalf("no key: status = %d, want 401", denied.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/admin/sessions", nil)
+	request.Header.Set("Authorization", "Bearer "+AdminKey(secret))
+	allowed := httptest.NewRecorder()
+	handler.ServeHTTP(allowed, request)
+	if allowed.Code != http.StatusOK || !bytes.Contains(allowed.Body.Bytes(), []byte(`"sessions":[]`)) {
+		t.Fatalf("valid key: %d %s", allowed.Code, allowed.Body)
+	}
+
+	del := httptest.NewRequest(http.MethodDelete, "/admin/sessions/missing", nil)
+	del.Header.Set("Authorization", "Bearer "+AdminKey(secret))
+	missing := httptest.NewRecorder()
+	handler.ServeHTTP(missing, del)
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("unknown session: status = %d, want 404", missing.Code)
 	}
 }
 

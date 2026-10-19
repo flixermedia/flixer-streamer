@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -76,6 +77,14 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) {
 			h.handleStream(w, r)
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/admin/") {
+			h.handleAdmin(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/hls/") {
+			h.handleHLS(w, r)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/info/") {
 			h.handleInfo(w, r)
 			return
@@ -96,28 +105,57 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "activeTranscodes": h.activeTranscodes()})
+}
+
+func (h *Handler) activeTranscodes() int {
+	if h.transcoder == nil {
+		return 0
+	}
+	return h.transcoder.Active()
 }
 
 // authorize validates the token in the URL path after prefix and returns the
 // canonical media path. It writes the error response itself on failure.
 func (h *Handler) authorize(w http.ResponseWriter, r *http.Request, prefix string) (token.Locator, bool) {
-	rawToken := strings.TrimPrefix(r.URL.Path, prefix)
+	locator, _, ok := h.authorizeToken(w, strings.TrimPrefix(r.URL.Path, prefix))
+	return locator, ok
+}
+
+func (h *Handler) authorizeToken(w http.ResponseWriter, rawToken string) (token.Locator, token.Claims, bool) {
 	if rawToken == "" || strings.Contains(rawToken, "/") {
 		h.writeError(w, http.StatusUnauthorized, "invalid_token", "A valid stream token is required")
-		return token.Locator{}, false
+		return token.Locator{}, token.Claims{}, false
 	}
 	claims, err := token.Validate(rawToken, h.secret, time.Now())
 	if err != nil {
 		h.writeError(w, http.StatusUnauthorized, "invalid_token", "A valid stream token is required")
-		return token.Locator{}, false
+		return token.Locator{}, token.Claims{}, false
 	}
 	locator, err := token.DecryptLocator(claims.MediaLocator, h.secret)
 	if err != nil {
 		h.writeError(w, http.StatusUnauthorized, "invalid_token", "A valid stream token is required")
-		return token.Locator{}, false
+		return token.Locator{}, token.Claims{}, false
 	}
-	return locator, true
+	return locator, claims, true
+}
+
+// sessionMeta describes the playback session for the admin API.
+func sessionMeta(r *http.Request, claims token.Claims, locator token.Locator, probe transcode.Probe, delivery string) transcode.SessionMeta {
+	remote := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0])
+	if remote == "" {
+		remote, _, _ = net.SplitHostPort(r.RemoteAddr)
+	}
+	return transcode.SessionMeta{
+		ID:         claims.PlaySessionID,
+		UserID:     claims.UserID,
+		MediaItem:  claims.MediaItemID,
+		File:       locator.RelativePath,
+		Delivery:   delivery,
+		RemoteAddr: remote,
+		UserAgent:  r.UserAgent(),
+		Source:     probe,
+	}
 }
 
 func parseOptions(r *http.Request) (transcode.Options, error) {
@@ -210,7 +248,8 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 		return
 	}
-	locator, ok := h.authorize(w, r, "/stream/")
+	rawToken := strings.TrimPrefix(r.URL.Path, "/stream/")
+	locator, claims, ok := h.authorizeToken(w, rawToken)
 	if !ok {
 		return
 	}
@@ -226,7 +265,7 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if mode != transcode.ModeDirectPlay {
-			h.streamProcessed(w, r, path, probe, mode, options)
+			h.streamProcessed(w, r, path, probe, mode, options, sessionMeta(r, claims, locator, probe, "progressive"))
 			return
 		}
 	} else if options.Height != 0 || options.StartSeconds != 0 {
@@ -264,17 +303,27 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 
-func (h *Handler) streamProcessed(w http.ResponseWriter, r *http.Request, path string, probe transcode.Probe, mode transcode.Mode, options transcode.Options) {
+func (h *Handler) streamProcessed(w http.ResponseWriter, r *http.Request, path string, probe transcode.Probe, mode transcode.Mode, options transcode.Options, meta transcode.SessionMeta) {
 	plan, err := transcode.BuildPlan(path, probe, mode, options)
 	if err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_options", "Unsupported playback options")
 		return
 	}
-	err = h.transcoder.Stream(r.Context(), plan, w, r.Method == http.MethodHead)
+	plan.Meta = meta
+	h.finishStream(w, r, plan, mode, "5")
+}
+
+// finishStream runs the plan and maps the outcome to a response.
+func (h *Handler) finishStream(w http.ResponseWriter, r *http.Request, plan transcode.Plan, mode transcode.Mode, retryAfter string) {
+	err := h.transcoder.Stream(r.Context(), plan, w, r.Method == http.MethodHead)
 	switch {
+	case errors.Is(err, transcode.ErrCancelled):
+		h.logger.Info("session cancelled by administrator", "session", plan.Meta.ID)
+		// Abort so the client sees a failed stream instead of a clean end.
+		panic(http.ErrAbortHandler)
 	case err == nil || r.Context().Err() != nil:
 	case errors.Is(err, transcode.ErrBusy):
-		w.Header().Set("Retry-After", "5")
+		w.Header().Set("Retry-After", retryAfter)
 		h.writeError(w, http.StatusServiceUnavailable, "transcoder_busy", "Too many active transcodes, try again shortly")
 	default:
 		h.logger.Error("processed stream failed", "mode", mode, "error", err)

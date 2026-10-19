@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -58,6 +59,10 @@ type Plan struct {
 	Mode        Mode
 	ContentType string
 	Args        []string
+	// Meta, Height and Position describe the session for the admin API.
+	Meta     SessionMeta
+	Height   int
+	Position float64
 }
 
 func ValidHeight(height int) bool {
@@ -143,7 +148,7 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 			args = append(args, "-c:a", "libopus", "-b:a", "128k", "-ac", "2")
 		}
 		args = append(args, "-f", "webm", "pipe:1")
-		return Plan{Mode: mode, ContentType: "video/webm", Args: args}, nil
+		return Plan{Mode: mode, ContentType: "video/webm", Args: args, Height: options.Height, Position: options.StartSeconds}, nil
 	}
 
 	if probe.AudioCodec == "aac" && mode == ModeRemux {
@@ -155,16 +160,25 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
 		"-f", "mp4", "pipe:1",
 	)
-	return Plan{Mode: mode, ContentType: "video/mp4", Args: args}, nil
+	return Plan{Mode: mode, ContentType: "video/mp4", Args: args, Height: options.Height, Position: options.StartSeconds}, nil
 }
 
 type Transcoder struct {
 	ffmpegPath  string
 	ffprobePath string
 	slots       chan struct{}
+	active      atomic.Int64
+	sessions    *registry
 	logger      *slog.Logger
 	logLevel    string
 }
+
+// Active returns the number of ffmpeg sessions currently running.
+func (t *Transcoder) Active() int { return int(t.active.Load()) }
+
+// writeStall is how long a client may stop reading before its ffmpeg is killed
+// and the slot freed. Paused players keep buffering well within this window.
+const writeStall = 2 * time.Minute
 
 // ValidLogLevel reports whether level is an ffmpeg -loglevel name.
 func ValidLogLevel(level string) bool {
@@ -196,6 +210,7 @@ func New(ffmpegPath, ffprobePath string, maxConcurrent int, logger *slog.Logger,
 		ffmpegPath:  ffmpegPath,
 		ffprobePath: ffprobePath,
 		slots:       make(chan struct{}, maxConcurrent),
+		sessions:    newRegistry(),
 		logger:      logger,
 		logLevel:    logLevel,
 	}, nil
@@ -248,7 +263,10 @@ func (t *Transcoder) Probe(ctx context.Context, path string) (Probe, error) {
 // Stream runs ffmpeg and copies its output to w. Headers are written only after
 // ffmpeg produces its first bytes so a failed start can still return an error.
 // Cancelling ctx (client disconnect) kills ffmpeg.
-func (t *Transcoder) Stream(ctx context.Context, plan Plan, w http.ResponseWriter, head bool) error {
+func (t *Transcoder) Stream(parent context.Context, plan Plan, w http.ResponseWriter, head bool) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+
 	select {
 	case t.slots <- struct{}{}:
 		defer func() { <-t.slots }()
@@ -256,6 +274,23 @@ func (t *Transcoder) Stream(ctx context.Context, plan Plan, w http.ResponseWrite
 		return ctx.Err()
 	case <-time.After(slotWait):
 		return ErrBusy
+	}
+
+	var session *handle
+	if !head {
+		var err error
+		session, err = t.sessions.begin(plan.Meta, plan.Mode, plan.Height, plan.Position, cancel)
+		if err != nil {
+			return err
+		}
+		defer session.end()
+	}
+	// Admin cancellation surfaces as ErrCancelled rather than a client disconnect.
+	finish := func(err error) error {
+		if session != nil && session.cancelled() {
+			return ErrCancelled
+		}
+		return err
 	}
 
 	// The "level" flag prefixes each line with [level] so it can be mapped to a log level.
@@ -272,14 +307,17 @@ func (t *Transcoder) Stream(ctx context.Context, plan Plan, w http.ResponseWrite
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
-	t.logger.Info("ffmpeg started", "pid", cmd.Process.Pid, "mode", string(plan.Mode), "args", strings.Join(args, " "))
+	if session != nil {
+		session.setPID(cmd.Process.Pid)
+	}
+	t.logger.Info("ffmpeg started", "pid", cmd.Process.Pid, "mode", string(plan.Mode), "session", plan.Meta.ID, "active", t.active.Add(1), "args", strings.Join(args, " "))
 	var waitOnce sync.Once
 	var waitErr error
 	wait := func() error {
 		waitOnce.Do(func() {
 			waitErr = cmd.Wait()
 			logWriter.Flush()
-			t.logger.Info("ffmpeg exited", "pid", cmd.Process.Pid, "duration", time.Since(started).String(), "error", waitErr)
+			t.logger.Info("ffmpeg exited", "pid", cmd.Process.Pid, "duration", time.Since(started).String(), "active", t.active.Add(-1), "error", waitErr)
 		})
 		return waitErr
 	}
@@ -289,7 +327,7 @@ func (t *Transcoder) Stream(ctx context.Context, plan Plan, w http.ResponseWrite
 	if _, err := reader.Peek(1); err != nil {
 		_ = cmd.Process.Kill()
 		_ = wait()
-		return fmt.Errorf("ffmpeg produced no output: %s", strings.TrimSpace(stderr.String()))
+		return finish(fmt.Errorf("ffmpeg produced no output: %s", strings.TrimSpace(stderr.String())))
 	}
 
 	w.Header().Set("Content-Type", plan.ContentType)
@@ -308,10 +346,12 @@ func (t *Transcoder) Stream(ctx context.Context, plan Plan, w http.ResponseWrite
 	for {
 		n, readErr := reader.Read(buffer)
 		if n > 0 {
+			_ = controller.SetWriteDeadline(time.Now().Add(writeStall))
 			if _, writeErr := w.Write(buffer[:n]); writeErr != nil {
 				_ = cmd.Process.Kill()
-				return writeErr
+				return finish(writeErr)
 			}
+			session.addBytes(n)
 			_ = controller.Flush()
 		}
 		if readErr == io.EOF {
@@ -319,14 +359,23 @@ func (t *Transcoder) Stream(ctx context.Context, plan Plan, w http.ResponseWrite
 		}
 		if readErr != nil {
 			_ = cmd.Process.Kill()
-			return readErr
+			return finish(readErr)
 		}
 	}
 	if err := wait(); err != nil && ctx.Err() == nil {
 		return fmt.Errorf("ffmpeg failed: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
-	return nil
+	return finish(nil)
 }
+
+// Sessions returns the playback sessions that are running or recently active.
+func (t *Transcoder) Sessions() []SessionInfo { return t.sessions.list() }
+
+// CancelSession stops a session's ffmpeg processes and blocks it from restarting.
+func (t *Transcoder) CancelSession(id string) bool { return t.sessions.cancel(id) }
+
+// MaxConcurrent returns the configured transcode slot limit.
+func (t *Transcoder) MaxConcurrent() int { return cap(t.slots) }
 
 // lineLogger turns ffmpeg's stderr lines into structured log records.
 type lineLogger struct {
