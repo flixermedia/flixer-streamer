@@ -30,6 +30,8 @@ type Config struct {
 	TranscodeDir   string
 	AllowedOrigins []string
 	LogLevel       slog.Level
+	LogDir         string
+	FlixerURL      string
 }
 
 func Load() (Config, error) {
@@ -83,6 +85,8 @@ func Load() (Config, error) {
 		TranscodeDir:   envOrDefault("TRANSCODE_DIR", "./cache/transcode"),
 		AllowedOrigins: splitNonEmpty(os.Getenv("ALLOWED_ORIGINS"), ","),
 		LogLevel:       level,
+		LogDir:         strings.TrimSpace(os.Getenv("LOG_DIR")),
+		FlixerURL:      strings.TrimRight(envOrDefault("FLIXER_URL", "http://localhost:8083"), "/"),
 	}, nil
 }
 

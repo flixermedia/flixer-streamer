@@ -3,17 +3,26 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/flixermedia/flixer-streamer/internal/config"
 	"github.com/flixermedia/flixer-streamer/internal/httpserver"
+	"github.com/flixermedia/flixer-streamer/internal/logfile"
 	"github.com/flixermedia/flixer-streamer/internal/media"
+	"github.com/flixermedia/flixer-streamer/internal/monitoring"
 	"github.com/flixermedia/flixer-streamer/internal/transcode"
+)
+
+const (
+	logFileMaxBytes = 10 * 1024 * 1024
+	logFileBackups  = 3
 )
 
 func main() {
@@ -23,9 +32,35 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	var logOutput io.Writer = os.Stdout
+	if cfg.LogDir != "" {
+		file, err := logfile.Open(filepath.Join(cfg.LogDir, "streamer.log"), logFileMaxBytes, logFileBackups)
+		if err != nil {
+			slog.Error("open log file", "error", err)
+			os.Exit(1)
+		}
+		defer file.Close()
+		logOutput = io.MultiWriter(os.Stdout, file)
+	}
+	logger := slog.New(slog.NewJSONHandler(logOutput, &slog.HandlerOptions{
 		Level: cfg.LogLevel,
 	}))
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// flixer decides whether Sentry runs; wait up to a minute for it, then start without.
+	sentryConfig := monitoring.Fetch(ctx, monitoring.FetchOptions{BaseURL: cfg.FlixerURL, App: "streamer", Logger: logger})
+	sentryEnabled, flushSentry, err := monitoring.Start(sentryConfig, "")
+	if err != nil {
+		logger.Warn("Sentry disabled", "error", err)
+	}
+	if sentryEnabled {
+		logger = monitoring.WrapLogger(logger)
+		logger.Info("Sentry monitoring enabled")
+	}
+	defer flushSentry()
+
 	roots := make([]media.Root, 0, len(cfg.MediaRoots))
 	for _, root := range cfg.MediaRoots {
 		roots = append(roots, media.Root{ID: root.ID, Path: root.Path})
@@ -49,21 +84,22 @@ func main() {
 		AllowedOrigins: cfg.AllowedOrigins,
 		Logger:         logger,
 	})
+	var rootHandler http.Handler = handler
+	if sentryEnabled {
+		rootHandler = monitoring.Middleware(handler)
+	}
 	server := &http.Server{
 		Addr:              cfg.ListenAddress(),
-		Handler:           handler,
+		Handler:           rootHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	serverErrors := make(chan error, 1)
-	go func() {
+	monitoring.Go(func() {
 		logger.Info("streamer listening", "address", server.Addr)
 		serverErrors <- server.ListenAndServe()
-	}()
+	})
 
 	select {
 	case err := <-serverErrors:
