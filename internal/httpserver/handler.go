@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"mime"
 	"net"
 	"net/http"
@@ -83,6 +84,14 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) {
 		}
 		if strings.HasPrefix(r.URL.Path, "/hls/") {
 			h.handleHLS(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/lyrics/") {
+			h.handleLyrics(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/subtitles/") {
+			h.handleSubtitles(w, r)
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/info/") {
@@ -222,13 +231,25 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	body := map[string]any{
 		"playMethod":       mode,
 		"source":           probe,
 		"availableHeights": availableHeights(probe.Height),
-	})
+	}
+	// A stream-copy seek begins at the keyframe before the request, so tell the
+	// player where it really starts to keep subtitles in step.
+	if mode == transcode.ModeRemux && options.StartSeconds > 0 {
+		if path, err := h.resolver.Resolve(locator.RootID, locator.RelativePath); err == nil {
+			if keyframe, err := h.transcoder.KeyframeAtOrBefore(r.Context(), path, options.StartSeconds); err == nil {
+				body["keyframeStart"] = keyframe
+			} else {
+				h.logger.Warn("keyframe lookup failed", "error", err)
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // availableHeights lists requested resolutions that are smaller than the source.
@@ -259,7 +280,7 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.transcoder != nil {
+	if h.transcoder != nil && !isAudioFile(locator.RelativePath) {
 		path, probe, mode, ok := h.prepare(w, r, locator, options)
 		if !ok {
 			return
@@ -291,7 +312,9 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusInternalServerError, "stream_failed", "Unable to serve media")
 		return
 	}
-	if contentType := mime.TypeByExtension(filepath.Ext(info.Name())); contentType != "" {
+	if contentType := audioContentType(info.Name()); contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	} else if contentType := mime.TypeByExtension(filepath.Ext(info.Name())); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	} else {
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -304,6 +327,15 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) streamProcessed(w http.ResponseWriter, r *http.Request, path string, probe transcode.Probe, mode transcode.Mode, options transcode.Options, meta transcode.SessionMeta) {
+	if mode == transcode.ModeRemux && options.StartSeconds > 0 {
+		if keyframe, err := h.transcoder.KeyframeAtOrBefore(r.Context(), path, options.StartSeconds); err == nil {
+			// Seek just before the keyframe so it is kept; the player's clock starts at the keyframe.
+			options.StartSeconds = math.Max(0, keyframe-0.005)
+			options.KeyframeStart = true
+		} else {
+			h.logger.Warn("keyframe lookup failed", "error", err)
+		}
+	}
 	plan, err := transcode.BuildPlan(path, probe, mode, options)
 	if err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_options", "Unsupported playback options")

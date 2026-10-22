@@ -143,9 +143,9 @@ Encrypt its UTF-8 bytes with AES-256-GCM. Derive the 32-byte AES key as
 the exact string `flixer-streamer:media-locator:v1` as GCM additional
 authenticated data, and prepend the 12-byte random nonce to ciphertext plus
 the 16-byte GCM tag before unpadded base64url encoding. This hides root-relative
-names from clients inspecting the signed token. `rootId` is `root-1`, `root-2`,
-etc., following the order of `MEDIA_ROOTS`; keep root order stable while tokens
-are valid.
+names from clients inspecting the signed token. `rootId` is an opaque ID that
+Flixer assigns to each root media folder; the streamer learns the ID-to-path
+mapping from Flixer.
 
 The streamer verifies algorithm/type, HMAC, issuer, audience, required claims,
 timestamps, maximum token lifetime, and authenticated locator encryption before
@@ -318,9 +318,10 @@ arguments or filesystem paths to clients.
 ## Configuration and rollout
 
 The streamer reads `.env` without overriding variables already in the process
-environment. `MEDIA_ROOTS` accepts a JSON array (recommended, especially on
-Windows) or the platform path-list separator. Each configured root must exist
-and be a directory. Root IDs are assigned by array order. `FFMPEG_PATH`
+environment. Root media folders are not configured here: the streamer fetches
+them from Flixer (`GET /api/streamer/media-roots`, signed with HMAC-SHA256 over
+`flixer-streamer:media-roots:v1:<unix seconds>` using `STREAM_TOKEN_SECRET`) and
+refreshes them every minute; unusable roots are skipped. `FFMPEG_PATH`
 (default `ffmpeg`), `FFPROBE_PATH` (default `ffprobe`, or next to an explicit
 `FFMPEG_PATH`) and `MAX_TRANSCODES` control remuxing/transcoding. `TRANSCODE_DIR`
 is reserved for the HLS phase.
