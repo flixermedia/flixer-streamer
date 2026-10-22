@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"os/exec"
 	"path/filepath"
@@ -53,6 +54,9 @@ type Options struct {
 	Height int
 	// StartSeconds is the offset to begin streaming from.
 	StartSeconds float64
+	// KeyframeStart marks StartSeconds as a video keyframe position, so a
+	// stream-copy output begins exactly there for both audio and video.
+	KeyframeStart bool
 }
 
 type Plan struct {
@@ -126,7 +130,13 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 	if options.StartSeconds > 0 {
 		args = append(args, "-ss", strconv.FormatFloat(options.StartSeconds, 'f', 3, 64))
 	}
-	args = append(args, "-i", inputPath, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn")
+	args = append(args, "-i", inputPath)
+	if mode == ModeRemux && options.KeyframeStart {
+		// Without this ffmpeg also copies everything from the demuxer's coarser
+		// seek point (often ~10s earlier), shifting the timeline.
+		args = append(args, "-copypriorss", "0")
+	}
+	args = append(args, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn")
 
 	webm := mode == ModeRemux && probe.VideoCodec != "h264"
 	if mode == ModeRemux {
@@ -261,6 +271,40 @@ func (t *Transcoder) Probe(ctx context.Context, path string) (Probe, error) {
 	}
 	probe.Duration, _ = strconv.ParseFloat(parsed.Format.Duration, 64)
 	return probe, nil
+}
+
+// KeyframeAtOrBefore returns the position of the last video keyframe at or
+// before start, rounded up to 10ms so it can be passed back as a start offset.
+// Stream-copy seeks land on a keyframe, so this is where such a stream begins.
+func (t *Transcoder) KeyframeAtOrBefore(ctx context.Context, path string, start float64) (float64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	from := math.Max(0, start-60)
+	interval := fmt.Sprintf("%.3f%%%.3f", from, start+0.1)
+	var stdout bytes.Buffer
+	cmd := exec.CommandContext(ctx, t.ffprobePath,
+		"-v", "error", "-select_streams", "v:0", "-read_intervals", interval,
+		"-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", path)
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return 0, fmt.Errorf("ffprobe keyframes: %w", err)
+	}
+	best, found := 0.0, false
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		fields := strings.Split(strings.TrimSpace(line), ",")
+		if len(fields) < 2 || !strings.HasPrefix(fields[1], "K") {
+			continue
+		}
+		pts, err := strconv.ParseFloat(fields[0], 64)
+		if err == nil && pts <= start && pts >= best {
+			best, found = pts, true
+		}
+	}
+	if !found {
+		return 0, errors.New("no keyframe found")
+	}
+	return math.Ceil(best*100) / 100, nil
 }
 
 // Stream runs ffmpeg and copies its output to w. Headers are written only after

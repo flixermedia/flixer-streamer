@@ -87,7 +87,7 @@ cd flixer-streamer
 cp .env.example .env
 ```
 
-Configure at least `STREAM_TOKEN_SECRET` and `MEDIA_ROOTS` in `.env`, then build and run:
+Configure at least `STREAM_TOKEN_SECRET` (and `FLIXER_URL`) in `.env`, then build and run:
 
 ```bash
 go build -o flixer-streamer ./cmd/flixer-streamer
@@ -129,7 +129,7 @@ Copy `.env.example` and adjust the values to match your installation.
 | --- | --- | --- |
 | `PORT` | HTTP listen port. | `8091` |
 | `STREAM_TOKEN_SECRET` | Shared token-signing secret; must match the Flixer backend and contain at least 32 random bytes. | **Required** |
-| `MEDIA_ROOTS` | Ordered list of local media folders; JSON array recommended. | `["/media/movies","/media/tv"]` |
+| `FLIXER_URL` | Base URL of Flixer. The streamer fetches its root media folders (Flixer's `STREAM_MEDIA_ROOT`) from here. | `http://localhost:8083` |
 | `FFMPEG_PATH` | FFmpeg executable path. | `ffmpeg` |
 | `FFPROBE_PATH` | FFprobe executable path (optional). | `ffprobe` |
 | `MAX_TRANSCODES` | Maximum simultaneous FFmpeg jobs; `0` means unlimited. | `0` |
@@ -138,7 +138,7 @@ Copy `.env.example` and adjust the values to match your installation.
 | `ALLOWED_ORIGINS` | Optional comma-separated permitted browser origins; empty disables cross-origin browser access. | Empty |
 | `LOG_LEVEL` | Service logging level. | `info` |
 
-**Important:** Media root IDs are assigned by the order in `MEDIA_ROOTS` (`root-1`, `root-2`, etc.). Preserve this order while issued playback tokens are still valid.
+**Media roots:** the streamer has no media folder setting. It asks Flixer for the root folders (signed with `STREAM_TOKEN_SECRET`) at startup and re-checks every minute. Media libraries (Movies, TV Shows, ...) are created by admins in Flixer from folders inside those roots.
 
 ---
 

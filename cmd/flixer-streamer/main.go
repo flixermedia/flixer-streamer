@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/flixermedia/flixer-streamer/internal/config"
+	"github.com/flixermedia/flixer-streamer/internal/flixer"
 	"github.com/flixermedia/flixer-streamer/internal/httpserver"
 	"github.com/flixermedia/flixer-streamer/internal/logfile"
 	"github.com/flixermedia/flixer-streamer/internal/media"
@@ -43,8 +44,9 @@ func main() {
 		logOutput = io.MultiWriter(os.Stdout, file)
 	}
 	logger := slog.New(slog.NewJSONHandler(logOutput, &slog.HandlerOptions{
-		Level: cfg.LogLevel,
-	}))
+		Level:       cfg.LogLevel,
+		ReplaceAttr: logfile.UnifiedAttrs,
+	})).With("app", "flixer-streamer")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -61,15 +63,11 @@ func main() {
 	}
 	defer flushSentry()
 
-	roots := make([]media.Root, 0, len(cfg.MediaRoots))
-	for _, root := range cfg.MediaRoots {
-		roots = append(roots, media.Root{ID: root.ID, Path: root.Path})
-	}
-	resolver, err := media.NewResolver(roots)
-	if err != nil {
-		logger.Error("configure media roots", "error", err)
-		os.Exit(1)
-	}
+	// Root media folders belong to flixer; they load in the background so the streamer can start first.
+	resolver := media.NewEmptyResolver()
+	monitoring.Go(func() {
+		flixer.SyncRoots(ctx, resolver, cfg.FlixerURL, []byte(cfg.TokenSecret), logger)
+	})
 
 	transcoder, err := transcode.New(cfg.FFmpegPath, cfg.FFprobePath, cfg.MaxTranscodes, logger, cfg.FFmpegLogLevel)
 	if err != nil {

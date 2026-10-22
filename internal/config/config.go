@@ -2,7 +2,6 @@ package config
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,15 +13,9 @@ import (
 	"github.com/flixermedia/flixer-streamer/internal/transcode"
 )
 
-type MediaRoot struct {
-	ID   string
-	Path string
-}
-
 type Config struct {
 	Port           string
 	TokenSecret    string
-	MediaRoots     []MediaRoot
 	FFmpegPath     string
 	FFmpegLogLevel string
 	FFprobePath    string
@@ -54,11 +47,6 @@ func Load() (Config, error) {
 		return Config{}, errors.New("STREAM_TOKEN_SECRET or JWT_SECRET must contain at least 32 bytes")
 	}
 
-	roots, err := parseMediaRoots(os.Getenv("MEDIA_ROOTS"))
-	if err != nil {
-		return Config{}, err
-	}
-
 	level, err := parseLogLevel(envOrDefault("LOG_LEVEL", "info"))
 	if err != nil {
 		return Config{}, err
@@ -77,7 +65,6 @@ func Load() (Config, error) {
 	return Config{
 		Port:           port,
 		TokenSecret:    secret,
-		MediaRoots:     roots,
 		FFmpegPath:     ffmpegPath,
 		FFmpegLogLevel: ffmpegLogLevel,
 		FFprobePath:    envOrDefault("FFPROBE_PATH", siblingProbePath(ffmpegPath)),
@@ -101,38 +88,6 @@ func siblingProbePath(ffmpegPath string) string {
 		return "ffprobe"
 	}
 	return filepath.Join(dir, "ffprobe"+filepath.Ext(ffmpegPath))
-}
-
-func parseMediaRoots(value string) ([]MediaRoot, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil, errors.New("MEDIA_ROOTS must contain at least one directory")
-	}
-
-	var paths []string
-	if strings.HasPrefix(value, "[") {
-		if err := json.Unmarshal([]byte(value), &paths); err != nil {
-			return nil, fmt.Errorf("parse MEDIA_ROOTS JSON array: %w", err)
-		}
-	} else {
-		paths = filepath.SplitList(value)
-	}
-
-	roots := make([]MediaRoot, 0, len(paths))
-	for i, path := range paths {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			return nil, fmt.Errorf("MEDIA_ROOTS entry %d is empty", i)
-		}
-		roots = append(roots, MediaRoot{
-			ID:   fmt.Sprintf("root-%d", i+1),
-			Path: path,
-		})
-	}
-	if len(roots) == 0 {
-		return nil, errors.New("MEDIA_ROOTS must contain at least one directory")
-	}
-	return roots, nil
 }
 
 func parseLogLevel(value string) (slog.Level, error) {
