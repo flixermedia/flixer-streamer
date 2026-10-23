@@ -336,6 +336,7 @@ func (h *Handler) streamProcessed(w http.ResponseWriter, r *http.Request, path s
 			h.logger.Warn("keyframe lookup failed", "error", err)
 		}
 	}
+	options.Encoder = h.transcoder.Settings()
 	plan, err := transcode.BuildPlan(path, probe, mode, options)
 	if err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_options", "Unsupported playback options")

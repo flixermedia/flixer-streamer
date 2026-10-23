@@ -42,20 +42,24 @@ func BuildPlaylist(probe Probe, query string) string {
 // BuildSegmentPlan returns ffmpeg arguments that encode one H.264/AAC MPEG-TS
 // segment. Video is always re-encoded so every segment starts on a keyframe,
 // and timestamps are offset so segments join seamlessly.
-func BuildSegmentPlan(inputPath string, probe Probe, index int, height int) (Plan, error) {
+func BuildSegmentPlan(inputPath string, probe Probe, index int, height int, encoder Settings) (Plan, error) {
 	if !ValidHeight(height) || index < 0 || index >= SegmentCount(probe) {
 		return Plan{}, ErrInvalidArgs
 	}
 	start := strconv.FormatFloat(float64(index*SegmentSeconds), 'f', 3, 64)
-	args := []string{
-		"-hide_banner", "-nostdin",
+	args := append([]string{"-hide_banner", "-nostdin"}, encoder.inputArgs()...)
+	args = append(args,
 		"-ss", start, "-i", inputPath, "-t", strconv.Itoa(SegmentSeconds),
 		"-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
-		"-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-		"-profile:v", "high", "-pix_fmt", "yuv420p", "-force_key_frames", "0",
-	}
+	)
+	args = append(args, encoder.videoArgs()...)
+	args = append(args, "-force_key_frames", "0")
+	scaleHeight := 0
 	if needsScaling(probe, Options{Height: height}) {
-		args = append(args, "-vf", fmt.Sprintf("scale=-2:%d", height))
+		scaleHeight = height
+	}
+	if filter := encoder.videoFilter(scaleHeight); filter != "" {
+		args = append(args, "-vf", filter)
 	}
 	args = append(args,
 		"-c:a", "aac", "-b:a", "160k", "-ac", "2",

@@ -104,9 +104,19 @@ func Load() (Config, error) {
 		TranscodeDir:   envOrDefault("TRANSCODE_DIR", "./cache/transcode"),
 		AllowedOrigins: splitNonEmpty(os.Getenv("ALLOWED_ORIGINS"), ","),
 		LogLevel:       level,
-		LogDir:         strings.TrimSpace(os.Getenv("LOG_DIR")),
+		LogDir:         logDirectory(),
 		FlixerURL:      strings.TrimRight(envOrDefault("FLIXER_URL", "http://localhost:8083"), "/"),
 	}, nil
+}
+
+func logDirectory() string {
+	if dir := strings.TrimSpace(os.Getenv("LOG_DIR")); dir != "" {
+		return dir
+	}
+	if dir := strings.TrimSpace(os.Getenv("DATA_PATH")); dir != "" {
+		return filepath.Join(dir, "logs")
+	}
+	return ""
 }
 
 func (c Config) ListenAddress() string {
