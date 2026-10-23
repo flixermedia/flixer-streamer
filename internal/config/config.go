@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/flixermedia/flixer-streamer/internal/transcode"
 )
@@ -27,6 +28,30 @@ type Config struct {
 	FlixerURL      string
 }
 
+// secretFileWait is how long to wait for flixer to publish the shared secret on first start.
+const secretFileWait = 2 * time.Minute
+
+// ReadSecretFile returns the trimmed contents of path, waiting up to wait for it to appear. An empty path gives "".
+func ReadSecretFile(path string, wait time.Duration) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil && strings.TrimSpace(string(data)) != "" {
+			return strings.TrimSpace(string(data)), nil
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("read STREAM_TOKEN_SECRET_FILE: %w", err)
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("STREAM_TOKEN_SECRET_FILE %s was not published by flixer in time", path)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 func Load() (Config, error) {
 	if err := loadDotEnv(".env"); err != nil {
 		return Config{}, fmt.Errorf("load .env: %w", err)
@@ -43,8 +68,15 @@ func Load() (Config, error) {
 	if secret == "" {
 		secret = strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	}
+	if secret == "" {
+		fromFile, err := ReadSecretFile(os.Getenv("STREAM_TOKEN_SECRET_FILE"), secretFileWait)
+		if err != nil {
+			return Config{}, err
+		}
+		secret = fromFile
+	}
 	if len([]byte(secret)) < 32 {
-		return Config{}, errors.New("STREAM_TOKEN_SECRET or JWT_SECRET must contain at least 32 bytes")
+		return Config{}, errors.New("STREAM_TOKEN_SECRET, STREAM_TOKEN_SECRET_FILE or JWT_SECRET must contain at least 32 bytes")
 	}
 
 	level, err := parseLogLevel(envOrDefault("LOG_LEVEL", "info"))
