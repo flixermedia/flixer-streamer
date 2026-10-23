@@ -37,7 +37,7 @@ var AllowedHeights = []int{240, 360, 480, 720, 1080}
 const slotWait = 10 * time.Second
 
 var (
-	ErrBusy         = errors.New("too many concurrent transcodes")
+	ErrBusy        = errors.New("too many concurrent transcodes")
 	ErrInvalidArgs = errors.New("invalid transcode options")
 )
 
@@ -57,6 +57,8 @@ type Options struct {
 	// KeyframeStart marks StartSeconds as a video keyframe position, so a
 	// stream-copy output begins exactly there for both audio and video.
 	KeyframeStart bool
+	// Encoder holds the admin's video encoder settings; the zero value means the defaults.
+	Encoder Settings
 }
 
 type Plan struct {
@@ -127,6 +129,9 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 	}
 
 	args := []string{"-hide_banner", "-nostdin"}
+	if mode == ModeTranscode {
+		args = append(args, options.Encoder.inputArgs()...)
+	}
 	if options.StartSeconds > 0 {
 		args = append(args, "-ss", strconv.FormatFloat(options.StartSeconds, 'f', 3, 64))
 	}
@@ -142,12 +147,13 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 	if mode == ModeRemux {
 		args = append(args, "-c:v", "copy")
 	} else {
-		args = append(args,
-			"-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-			"-profile:v", "high", "-pix_fmt", "yuv420p",
-		)
+		args = append(args, options.Encoder.videoArgs()...)
+		scaleHeight := 0
 		if needsScaling(probe, options) {
-			args = append(args, "-vf", fmt.Sprintf("scale=-2:%d", options.Height))
+			scaleHeight = options.Height
+		}
+		if filter := options.Encoder.videoFilter(scaleHeight); filter != "" {
+			args = append(args, "-vf", filter)
 		}
 	}
 
@@ -176,7 +182,8 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 type Transcoder struct {
 	ffmpegPath  string
 	ffprobePath string
-	slots       chan struct{}
+	limiter     limiter
+	settings    atomic.Pointer[Settings]
 	active      atomic.Int64
 	sessions    *registry
 	logger      *slog.Logger
@@ -223,9 +230,7 @@ func New(ffmpegPath, ffprobePath string, maxConcurrent int, logger *slog.Logger,
 		logger:      logger,
 		logLevel:    logLevel,
 	}
-	if maxConcurrent > 0 {
-		t.slots = make(chan struct{}, maxConcurrent)
-	}
+	t.limiter.setLimit(maxConcurrent)
 	return t, nil
 }
 
@@ -314,17 +319,10 @@ func (t *Transcoder) Stream(parent context.Context, plan Plan, w http.ResponseWr
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
-	// A nil slots channel means no limit.
-	if t.slots != nil {
-		select {
-		case t.slots <- struct{}{}:
-			defer func() { <-t.slots }()
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(slotWait):
-			return ErrBusy
-		}
+	if err := t.limiter.acquire(ctx, slotWait); err != nil {
+		return err
 	}
+	defer t.limiter.release()
 	var session *handle
 	if !head {
 		var err error
@@ -424,7 +422,21 @@ func (t *Transcoder) Sessions() []SessionInfo { return t.sessions.list() }
 func (t *Transcoder) CancelSession(id string) bool { return t.sessions.cancel(id) }
 
 // MaxConcurrent returns the configured transcode limit; 0 means unlimited.
-func (t *Transcoder) MaxConcurrent() int { return cap(t.slots) }
+func (t *Transcoder) MaxConcurrent() int { return t.limiter.limit() }
+
+// SetMaxConcurrent changes the concurrency limit (0 means unlimited) without interrupting running sessions.
+func (t *Transcoder) SetMaxConcurrent(n int) { t.limiter.setLimit(n) }
+
+// Settings returns the current video encoder settings.
+func (t *Transcoder) Settings() Settings {
+	if current := t.settings.Load(); current != nil {
+		return *current
+	}
+	return Settings{}
+}
+
+// SetSettings replaces the video encoder settings; sessions already running keep theirs.
+func (t *Transcoder) SetSettings(s Settings) { t.settings.Store(&s) }
 
 // lineLogger turns ffmpeg's stderr lines into structured log records.
 type lineLogger struct {

@@ -21,14 +21,14 @@ func TestBuildPlaylist(t *testing.T) {
 
 func TestBuildSegmentPlan(t *testing.T) {
 	probe := Probe{VideoCodec: "hevc", Height: 1080, Duration: 30}
-	plan, err := BuildSegmentPlan("a.mkv", probe, 2, 720)
+	plan, err := BuildSegmentPlan("a.mkv", probe, 2, 720, Settings{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.ContentType != "video/mp2t" || !slices.Contains(plan.Args, "12.000") || !slices.Contains(plan.Args, "scale=-2:720") {
 		t.Errorf("unexpected plan: %v", plan.Args)
 	}
-	if _, err := BuildSegmentPlan("a.mkv", probe, 5, 0); err == nil {
+	if _, err := BuildSegmentPlan("a.mkv", probe, 5, 0, Settings{}); err == nil {
 		t.Error("expected out-of-range segment to fail")
 	}
 }

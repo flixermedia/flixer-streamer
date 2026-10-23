@@ -62,7 +62,7 @@ func (h *Handler) handleHLS(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusNotFound, "not_found", "Not found")
 		return
 	}
-	plan, err := transcode.BuildSegmentPlan(path, probe, index, options.Height)
+	plan, err := transcode.BuildSegmentPlan(path, probe, index, options.Height, h.transcoder.Settings())
 	if err != nil {
 		h.writeError(w, http.StatusNotFound, "not_found", "Segment is out of range")
 		return

@@ -75,6 +75,12 @@ func main() {
 		transcoder = nil
 	}
 
+	if transcoder != nil {
+		monitoring.Go(func() {
+			flixer.SyncTranscoding(ctx, transcoder, cfg.FlixerURL, []byte(cfg.TokenSecret), logger)
+		})
+	}
+
 	handler := httpserver.NewHandler(httpserver.Options{
 		Secret:         []byte(cfg.TokenSecret),
 		Resolver:       resolver,
