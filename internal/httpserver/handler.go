@@ -114,7 +114,7 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "activeTranscodes": h.activeTranscodes()})
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "version": appVersion(), "activeTranscodes": h.activeTranscodes()})
 }
 
 func (h *Handler) activeTranscodes() int {

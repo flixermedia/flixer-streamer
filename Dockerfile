@@ -8,6 +8,7 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/flixer-streamer ./cmd/flixer-streamer
 
 FROM alpine:3.22 AS runtime
+ARG APP_VERSION=dev
 RUN apk add --no-cache ca-certificates curl ffmpeg \
     && adduser -D -H -u 65532 streamer \
     && mkdir -p /var/cache/flixer/transcode \
@@ -15,7 +16,8 @@ RUN apk add --no-cache ca-certificates curl ffmpeg \
 
 COPY --from=build /out/flixer-streamer /usr/local/bin/flixer-streamer
 
-ENV PORT=8091 \
+ENV APP_VERSION=${APP_VERSION} \
+    PORT=8091 \
     FFMPEG_PATH=ffmpeg \
     FFPROBE_PATH=ffprobe \
     TRANSCODE_DIR=/var/cache/flixer/transcode

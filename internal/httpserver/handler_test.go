@@ -73,12 +73,13 @@ func TestStreamRejectsMissingOrInvalidToken(t *testing.T) {
 }
 
 func TestHealthEndpoint(t *testing.T) {
+		t.Setenv("APP_VERSION", "1.2.3")
 	handler := NewHandler(Options{
 		Logger: slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil)),
 	})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	if response.Code != http.StatusOK || response.Body.String() != "{\"activeTranscodes\":0,\"status\":\"ok\"}\n" {
+	if response.Code != http.StatusOK || response.Body.String() != "{\"activeTranscodes\":0,\"status\":\"ok\",\"version\":\"1.2.3\"}\n" {
 		t.Fatalf("health response = %d %q", response.Code, response.Body.String())
 	}
 }
