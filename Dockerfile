@@ -1,11 +1,13 @@
-FROM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 
 COPY go.mod go.sum ./
 COPY cmd ./cmd
 COPY internal ./internal
 
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/flixer-streamer ./cmd/flixer-streamer
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/flixer-streamer ./cmd/flixer-streamer
 
 FROM alpine:3.22 AS runtime
 ARG APP_VERSION=dev
