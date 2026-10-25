@@ -75,7 +75,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-See the [Flixer README](https://github.com/flixermedia/flixer#readme) for full stack configuration. The main stack shares `STREAM_TOKEN_SECRET` between the backend and streamer and mounts the media folder into both containers.
+See the [Flixer README](https://github.com/flixermedia/flixer#readme) for full stack configuration. The main stack shares `APP_SECRET` between the backend and streamer and mounts the media folder into both containers.
 
 ### Run the streamer from source
 
@@ -87,7 +87,7 @@ cd flixer-streamer
 cp .env.example .env
 ```
 
-Configure at least `STREAM_TOKEN_SECRET` (and `FLIXER_URL`) in `.env`, then build and run:
+Configure at least `APP_SECRET` (and `FLIXER_URL`) in `.env`, then build and run:
 
 ```bash
 go build -o flixer-streamer ./cmd/flixer-streamer
@@ -128,17 +128,18 @@ Copy `.env.example` and adjust the values to match your installation.
 | Variable | Description | Example / default |
 | --- | --- | --- |
 | `PORT` | HTTP listen port. | `8091` |
-| `STREAM_TOKEN_SECRET` | Shared token-signing secret; must match the Flixer backend and contain at least 32 random bytes. | **Required** |
+| `APP_SECRET` | Shared token-signing secret; must match the Flixer backend and contain at least 32 random bytes. | **Required** |
 | `FLIXER_URL` | Base URL of Flixer. The streamer fetches its root media folders (Flixer's `STREAM_MEDIA_ROOT`) from here. | `http://localhost:8083` |
 | `FFMPEG_PATH` | FFmpeg executable path. | `ffmpeg` |
 | `FFPROBE_PATH` | FFprobe executable path (optional). | `ffprobe` |
 | `MAX_TRANSCODES` | Maximum simultaneous FFmpeg jobs; `0` means unlimited. | `0` |
 | `FFMPEG_LOG_LEVEL` | Verbosity of forwarded FFmpeg output. | `info` |
 | `TRANSCODE_DIR` | Reserved for future HLS/transcoding cache use. | `./cache/transcode` |
+| `TRICKPLAY_DIR` | Shared read-only directory of indexed hover-seek sheets. | `/data/metadata/trickplay` |
 | `ALLOWED_ORIGINS` | Optional comma-separated permitted browser origins; empty disables cross-origin browser access. | Empty |
 | `LOG_LEVEL` | Service logging level. | `info` |
 
-**Media roots:** the streamer has no media folder setting. It asks Flixer for the root folders (signed with `STREAM_TOKEN_SECRET`) at startup and re-checks every minute. Media libraries (Movies, TV Shows, ...) are created by admins in Flixer from folders inside those roots.
+**Media roots:** the streamer has no media folder setting. It asks Flixer for the root folders (signed with `APP_SECRET`) at startup and re-checks every minute. Media libraries (Movies, TV Shows, ...) are created by admins in Flixer from folders inside those roots.
 
 ---
 
@@ -151,6 +152,7 @@ The following routes are implemented by the streamer:
 | `GET`, `HEAD` | `/stream/{token}` | Deliver authorized media via Direct Play, remuxing, or transcoding. |
 | `GET` | `/info/{token}` | Inspect the planned delivery method, source details, and available output heights. |
 | `GET` | `/healthz` | Liveness check. |
+| `GET`, `HEAD` | `/trickplay/{token}/index.json` or `/trickplay/{token}/{n}.jpg` | Serve private hover-seek metadata or a JPEG sheet from the shared trickplay cache. |
 
 ### Streaming options
 
@@ -194,7 +196,7 @@ Invalid or expired tokens return **401**; unresolved or disallowed media returns
 
 ## 🔐 Security by Design
 
-- **Signed tokens:** Requests use HS256 JWTs, validated against the configured `STREAM_TOKEN_SECRET`.
+- **Signed tokens:** Requests use HS256 JWTs, validated against the configured `APP_SECRET`.
 - **Encrypted media references:** Media root IDs and relative paths are carried in an AES-256-GCM-encrypted locator, not exposed as ordinary URL paths.
 - **Filesystem containment:** Paths are resolved against permitted media roots with traversal and symlink checks.
 - **Short-lived access:** Tokens include expiry and must not exceed the supported four-hour maximum lifetime.

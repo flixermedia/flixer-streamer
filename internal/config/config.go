@@ -22,6 +22,8 @@ type Config struct {
 	FFprobePath    string
 	MaxTranscodes  int
 	TranscodeDir   string
+	TrickplayDir   string
+	SubtitleDir    string
 	AllowedOrigins []string
 	LogLevel       slog.Level
 	LogDir         string
@@ -43,10 +45,10 @@ func ReadSecretFile(path string, wait time.Duration) (string, error) {
 			return strings.TrimSpace(string(data)), nil
 		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("read STREAM_TOKEN_SECRET_FILE: %w", err)
+			return "", fmt.Errorf("read APP_SECRET_FILE: %w", err)
 		}
 		if time.Now().After(deadline) {
-			return "", fmt.Errorf("STREAM_TOKEN_SECRET_FILE %s was not published by flixer in time", path)
+			return "", fmt.Errorf("APP_SECRET_FILE %s was not published by flixer in time", path)
 		}
 		time.Sleep(time.Second)
 	}
@@ -64,19 +66,19 @@ func Load() (Config, error) {
 		return Config{}, errors.New("PORT must be a valid port number from 1 to 65535")
 	}
 
-	secret := strings.TrimSpace(os.Getenv("STREAM_TOKEN_SECRET"))
+	secret := strings.TrimSpace(legacyEnv("APP_SECRET", "STREAM_TOKEN_SECRET"))
 	if secret == "" {
 		secret = strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	}
 	if secret == "" {
-		fromFile, err := ReadSecretFile(os.Getenv("STREAM_TOKEN_SECRET_FILE"), secretFileWait)
+		fromFile, err := ReadSecretFile(legacyEnv("APP_SECRET_FILE", "STREAM_TOKEN_SECRET_FILE"), secretFileWait)
 		if err != nil {
 			return Config{}, err
 		}
 		secret = fromFile
 	}
 	if len([]byte(secret)) < 32 {
-		return Config{}, errors.New("STREAM_TOKEN_SECRET, STREAM_TOKEN_SECRET_FILE or JWT_SECRET must contain at least 32 bytes")
+		return Config{}, errors.New("APP_SECRET, APP_SECRET_FILE or JWT_SECRET must contain at least 32 bytes")
 	}
 
 	level, err := parseLogLevel(envOrDefault("LOG_LEVEL", "info"))
@@ -102,6 +104,8 @@ func Load() (Config, error) {
 		FFprobePath:    envOrDefault("FFPROBE_PATH", siblingProbePath(ffmpegPath)),
 		MaxTranscodes:  maxTranscodes,
 		TranscodeDir:   envOrDefault("TRANSCODE_DIR", "./cache/transcode"),
+		TrickplayDir:   envOrDefault("TRICKPLAY_DIR", "/data/metadata/trickplay"),
+		SubtitleDir:    envOrDefault("SUBTITLE_DIR", filepath.Join(filepath.Dir(envOrDefault("TRICKPLAY_DIR", "/data/metadata/trickplay")), "subtitles")),
 		AllowedOrigins: splitNonEmpty(os.Getenv("ALLOWED_ORIGINS"), ","),
 		LogLevel:       level,
 		LogDir:         logDirectory(),
@@ -208,4 +212,12 @@ func splitNonEmpty(value, separator string) []string {
 		}
 	}
 	return values
+}
+
+// legacyEnv reads name, falling back to the variable it replaced so existing deployments keep working.
+func legacyEnv(name, legacy string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return os.Getenv(legacy)
 }

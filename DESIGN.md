@@ -101,7 +101,7 @@ unlisted `Origin`. CORS is not authentication; the stream token is mandatory.
 
 All timestamps are integer Unix seconds. The issuer must sign the exact compact
 JWT input (`base64url(header) + "." + base64url(payload)`) with HMAC-SHA256 using
-the shared `STREAM_TOKEN_SECRET` bytes. Base64url is unpadded. Header:
+the shared `APP_SECRET` bytes. Base64url is unpadded. Header:
 
 ```json
 {"alg":"HS256","typ":"JWT"}
@@ -320,7 +320,7 @@ arguments or filesystem paths to clients.
 The streamer reads `.env` without overriding variables already in the process
 environment. Root media folders are not configured here: the streamer fetches
 them from Flixer (`GET /api/streamer/media-roots`, signed with HMAC-SHA256 over
-`flixer-streamer:media-roots:v1:<unix seconds>` using `STREAM_TOKEN_SECRET`) and
+`flixer-streamer:media-roots:v1:<unix seconds>` using `APP_SECRET`) and
 refreshes them every minute; unusable roots are skipped. `FFMPEG_PATH`
 (default `ffmpeg`), `FFPROBE_PATH` (default `ffprobe`, or next to an explicit
 `FFMPEG_PATH`) and `MAX_TRANSCODES` control remuxing/transcoding. `TRANSCODE_DIR`
@@ -339,3 +339,8 @@ proxy and restrict network access to the trusted Flixer deployment.
 Before production use, add operational rate/concurrent-stream limits and
 metrics. The initial slice enforces per-token authorization and provides
 structured request logs, but it does not yet enforce per-user quotas.
+
+
+## Trickplay thumbnail sheets (implemented)
+
+The streamer serves hover-seek sheets from `TRICKPLAY_DIR` (default `/data/metadata/trickplay`), which should be mounted read-only and shared with the indexer's trickplay worker. `GET` and `HEAD /trickplay/{token}/index.json` and `/trickplay/{token}/{n}.jpg` require the usual short-lived stream token. The folder key is the first 32 lowercase hexadecimal characters of `SHA256(rootId + "\n" + relativePath)`. Only `index.json` and decimal-numbered JPEG filenames are accepted; missing files return `404 trickplay_not_available`. Index responses cache privately for five minutes and JPEG sheets for one day; `http.ServeContent` provides range and conditional-request support.

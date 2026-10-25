@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/flixermedia/flixer-streamer/internal/media"
+	"github.com/flixermedia/flixer-streamer/internal/token"
 )
 
 const maxSubtitleBytes = 5 << 20
@@ -60,7 +61,7 @@ func (h *Handler) handleSubtitles(w http.ResponseWriter, r *http.Request) {
 	prefix := strings.TrimSuffix(filepath.Base(video), filepath.Ext(video)) + "."
 
 	if file := r.URL.Query().Get("file"); file != "" {
-		h.serveSubtitle(w, locator.RootID, locator.RelativePath, prefix, file)
+		h.serveSubtitle(w, locator, prefix, file)
 		return
 	}
 
@@ -70,12 +71,17 @@ func (h *Handler) handleSubtitles(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusInternalServerError, "subtitles_failed", "Unable to read subtitles")
 		return
 	}
+	if stored, err := os.ReadDir(h.storedSubtitleDir(locator)); err == nil {
+		entries = append(entries, stored...)
+	}
 	tracks := []subtitleTrack{}
+	seen := map[string]bool{}
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || subtitleExt(name) == "" || !strings.HasPrefix(name, prefix) {
+		if e.IsDir() || subtitleExt(name) == "" || !strings.HasPrefix(name, prefix) || seen[name] {
 			continue
 		}
+		seen[name] = true
 		parts := strings.Split(strings.TrimSuffix(strings.TrimPrefix(name, prefix), filepath.Ext(name)), ".")
 		track := subtitleTrack{ID: name, Language: "und"}
 		if subtitleLanguage.MatchString(parts[0]) {
@@ -96,12 +102,24 @@ func (h *Handler) handleSubtitles(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"tracks": tracks})
 }
 
-func (h *Handler) serveSubtitle(w http.ResponseWriter, rootID, videoRel, prefix, file string) {
+// storedSubtitleDir is where the indexer keeps subtitles it could not write
+// beside the video; the name matches the trickplay key.
+func (h *Handler) storedSubtitleDir(locator token.Locator) string {
+	if h.subtitleDir == "" {
+		return ""
+	}
+	return filepath.Join(h.subtitleDir, trickplayKey(locator))
+}
+
+func (h *Handler) serveSubtitle(w http.ResponseWriter, locator token.Locator, prefix, file string) {
 	if file != filepath.Base(file) || strings.ContainsAny(file, `/\`) || subtitleExt(file) == "" || !strings.HasPrefix(file, prefix) {
 		h.writeError(w, http.StatusNotFound, "subtitle_not_found", "Subtitle is not available")
 		return
 	}
-	f, err := h.resolver.Open(rootID, path.Join(path.Dir(videoRel), file))
+	f, err := h.resolver.Open(locator.RootID, path.Join(path.Dir(locator.RelativePath), file))
+	if errors.Is(err, os.ErrNotExist) && h.subtitleDir != "" {
+		f, err = os.Open(filepath.Join(h.storedSubtitleDir(locator), file))
+	}
 	if errors.Is(err, os.ErrNotExist) || errors.Is(err, media.ErrInvalidLocator) {
 		h.writeError(w, http.StatusNotFound, "subtitle_not_found", "Subtitle is not available")
 		return

@@ -21,8 +21,11 @@ import (
 )
 
 type Options struct {
-	Secret         []byte
-	Resolver       *media.Resolver
+	Secret       []byte
+	Resolver     *media.Resolver
+	TrickplayDir string
+	// SubtitleDir holds subtitles the indexer stored for videos in read-only media folders.
+	SubtitleDir    string
 	Transcoder     *transcode.Transcoder
 	AllowedOrigins []string
 	Logger         *slog.Logger
@@ -31,6 +34,8 @@ type Options struct {
 type Handler struct {
 	secret         []byte
 	resolver       *media.Resolver
+	trickplayDir   string
+	subtitleDir    string
 	transcoder     *transcode.Transcoder
 	allowedOrigins map[string]struct{}
 	logger         *slog.Logger
@@ -48,6 +53,8 @@ func NewHandler(options Options) http.Handler {
 	h := &Handler{
 		secret:         options.Secret,
 		resolver:       options.Resolver,
+		trickplayDir:   options.TrickplayDir,
+		subtitleDir:    options.SubtitleDir,
 		transcoder:     options.Transcoder,
 		allowedOrigins: origins,
 		logger:         logger,
@@ -92,6 +99,10 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) {
 		}
 		if strings.HasPrefix(r.URL.Path, "/subtitles/") {
 			h.handleSubtitles(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/trickplay/") {
+			h.handleTrickplay(w, r)
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/info/") {
