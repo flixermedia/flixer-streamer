@@ -135,7 +135,7 @@ Copy `.env.example` and adjust the values to match your installation.
 | `MAX_TRANSCODES` | Maximum simultaneous FFmpeg jobs; `0` means unlimited. | `0` |
 | `FFMPEG_LOG_LEVEL` | Verbosity of forwarded FFmpeg output. | `info` |
 | `TRANSCODE_DIR` | Reserved for future HLS/transcoding cache use. | `./cache/transcode` |
-| `TRICKPLAY_DIR` | Shared read-only directory of indexed hover-seek sheets. | `/data/metadata/trickplay` |
+| `TRICKPLAY_DIR` | Shared read-only directory of indexed hover-seek sheets. | `/data/cache/trickplay` |
 | `ALLOWED_ORIGINS` | Optional comma-separated permitted browser origins; empty disables cross-origin browser access. | Empty |
 | `LOG_LEVEL` | Service logging level. | `info` |
 

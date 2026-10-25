@@ -103,9 +103,9 @@ func Load() (Config, error) {
 		FFmpegLogLevel: ffmpegLogLevel,
 		FFprobePath:    envOrDefault("FFPROBE_PATH", siblingProbePath(ffmpegPath)),
 		MaxTranscodes:  maxTranscodes,
-		TranscodeDir:   envOrDefault("TRANSCODE_DIR", "./cache/transcode"),
-		TrickplayDir:   envOrDefault("TRICKPLAY_DIR", "/data/metadata/trickplay"),
-		SubtitleDir:    envOrDefault("SUBTITLE_DIR", filepath.Join(filepath.Dir(envOrDefault("TRICKPLAY_DIR", "/data/metadata/trickplay")), "subtitles")),
+		TranscodeDir:   envOrDefault("TRANSCODE_DIR", dataSubdir("cache/transcode", "./cache/transcode")),
+		TrickplayDir:   envOrDefault("TRICKPLAY_DIR", dataSubdir("cache/trickplay", "/data/cache/trickplay")),
+		SubtitleDir:    envOrDefault("SUBTITLE_DIR", filepath.Join(filepath.Dir(envOrDefault("TRICKPLAY_DIR", dataSubdir("cache/trickplay", "/data/cache/trickplay"))), "subtitles")),
 		AllowedOrigins: splitNonEmpty(os.Getenv("ALLOWED_ORIGINS"), ","),
 		LogLevel:       level,
 		LogDir:         logDirectory(),
@@ -117,7 +117,7 @@ func logDirectory() string {
 	if dir := strings.TrimSpace(os.Getenv("LOG_DIR")); dir != "" {
 		return dir
 	}
-	if dir := strings.TrimSpace(os.Getenv("DATA_PATH")); dir != "" {
+	if dir := dataRoot(); dir != "" {
 		return filepath.Join(dir, "logs")
 	}
 	return ""
@@ -220,4 +220,16 @@ func legacyEnv(name, legacy string) string {
 		return value
 	}
 	return os.Getenv(legacy)
+}
+
+// dataRoot is DATA_PATH, inheriting DATA_DIR in development where there is no container mount.
+func dataRoot() string {
+	return strings.TrimSpace(envOrDefault("DATA_PATH", os.Getenv("DATA_DIR")))
+}
+
+func dataSubdir(sub, fallback string) string {
+	if root := dataRoot(); root != "" {
+		return filepath.Join(root, sub)
+	}
+	return fallback
 }
