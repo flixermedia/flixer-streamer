@@ -106,7 +106,7 @@ func Load() (Config, error) {
 		MaxTranscodes:  maxTranscodes,
 		TranscodeDir:   envOrDefault("TRANSCODE_DIR", dataSubdir("cache/transcode", "./cache/transcode")),
 		TrickplayDir:   envOrDefault("TRICKPLAY_DIR", dataSubdir("cache/trickplay", "/data/cache/trickplay")),
-		LyricsDir:      envOrDefault("LYRICS_PATH", dataSubdir("lyrics", "./data/lyrics")),
+		LyricsDir:      envOrDefault("LYRICS_PATH", dataSubdir("cache/lyrics", "./cache/lyrics")),
 		SubtitleDir:    envOrDefault("SUBTITLE_DIR", filepath.Join(filepath.Dir(envOrDefault("TRICKPLAY_DIR", dataSubdir("cache/trickplay", "/data/cache/trickplay"))), "subtitles")),
 		AllowedOrigins: splitNonEmpty(os.Getenv("ALLOWED_ORIGINS"), ","),
 		LogLevel:       level,
