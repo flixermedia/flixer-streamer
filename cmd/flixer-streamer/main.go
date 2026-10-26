@@ -86,6 +86,7 @@ func main() {
 		Resolver:       resolver,
 		TrickplayDir:   cfg.TrickplayDir,
 		SubtitleDir:    cfg.SubtitleDir,
+		LyricsDir:      cfg.LyricsDir,
 		Transcoder:     transcoder,
 		AllowedOrigins: cfg.AllowedOrigins,
 		Logger:         logger,

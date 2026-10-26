@@ -25,7 +25,9 @@ type Options struct {
 	Resolver     *media.Resolver
 	TrickplayDir string
 	// SubtitleDir holds subtitles the indexer stored for videos in read-only media folders.
-	SubtitleDir    string
+	SubtitleDir string
+	// LyricsDir holds lyrics the indexer downloaded, named <track id>.lrc.
+	LyricsDir      string
 	Transcoder     *transcode.Transcoder
 	AllowedOrigins []string
 	Logger         *slog.Logger
@@ -36,6 +38,7 @@ type Handler struct {
 	resolver       *media.Resolver
 	trickplayDir   string
 	subtitleDir    string
+	lyricsDir      string
 	transcoder     *transcode.Transcoder
 	allowedOrigins map[string]struct{}
 	logger         *slog.Logger
@@ -55,6 +58,7 @@ func NewHandler(options Options) http.Handler {
 		resolver:       options.Resolver,
 		trickplayDir:   options.TrickplayDir,
 		subtitleDir:    options.SubtitleDir,
+		lyricsDir:      options.LyricsDir,
 		transcoder:     options.Transcoder,
 		allowedOrigins: origins,
 		logger:         logger,

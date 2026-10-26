@@ -73,7 +73,7 @@ func TestStreamRejectsMissingOrInvalidToken(t *testing.T) {
 }
 
 func TestHealthEndpoint(t *testing.T) {
-		t.Setenv("APP_VERSION", "1.2.3")
+	t.Setenv("APP_VERSION", "1.2.3")
 	handler := NewHandler(Options{
 		Logger: slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil)),
 	})
@@ -161,4 +161,38 @@ func createStreamToken(t *testing.T, secret []byte, rootID, relativePath string)
 	mac := hmac.New(sha256.New, secret)
 	_, _ = mac.Write([]byte(unsigned))
 	return unsigned + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func TestLyricsPreferStoredCopyOverSidecar(t *testing.T) {
+	root, store := t.TempDir(), t.TempDir()
+	for name, body := range map[string]string{filepath.Join(root, "song.flac"): "audio", filepath.Join(root, "song.lrc"): "sidecar"} {
+		if err := os.WriteFile(name, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolver, err := media.NewResolver([]media.Root{{ID: "music", Path: root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := []byte("test-secret-that-is-at-least-thirty-two-bytes")
+	handler := NewHandler(Options{Secret: secret, Resolver: resolver, LyricsDir: store, Logger: slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil))})
+	tok := createStreamToken(t, secret, "music", "song.flac")
+
+	get := func() string {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/lyrics/"+tok, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", response.Code, response.Body)
+		}
+		return response.Body.String()
+	}
+	if got := get(); got != "sidecar" {
+		t.Fatalf("without a stored copy got %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(store, "item-1.lrc"), []byte("stored"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := get(); got != "stored" {
+		t.Fatalf("with a stored copy got %q", got)
+	}
 }
