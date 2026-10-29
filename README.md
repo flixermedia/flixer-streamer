@@ -51,10 +51,10 @@ cp .env.example .env
 # Configure APP_SECRET and FLIXER_URL
 go build -o flixer-streamer ./cmd/flixer-streamer
 ./flixer-streamer
-curl http://localhost:8091/healthz
+curl http://localhost:8091/streamer/healthz
 ```
 
-A passing health check does not issue playback access; `/stream/{token}` requires a backend-signed token. For containers, use `docker build -t flixer-streamer:local .`.
+A passing health check does not issue playback access; `/streamer/stream/{token}` requires a backend-signed token. For containers, use `docker build -t flixer-streamer:local .`.
 
 ## ⚙️ Configuration
 
@@ -74,12 +74,17 @@ See [`.env.example`](.env.example) for complete options.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /healthz` | Service health. |
-| `GET /info/{token}` | Planned playback information. |
-| `GET, HEAD /stream/{token}` | Authorized media delivery; `height` and `start` options. |
-| `GET, HEAD /trickplay/{token}/...` | Authorized thumbnail retrieval. |
+| `GET /streamer/healthz` | Service health. |
+| `GET /streamer/info/{token}` | Playback information. |
+| `GET, HEAD /streamer/stream/{token}` | Authorized media delivery; `height` and `start` options. |
+| `GET, HEAD /streamer/hls/{token}/...` | Authorized VOD HLS playlist and segments. |
+| `GET /streamer/lyrics/{token}` | Sidecar lyrics. |
+| `GET /streamer/subtitles/{token}` | Sidecar subtitle listing or file. |
+| `GET, HEAD /streamer/trickplay/{token}/...` | Authorized thumbnail retrieval. |
+| `GET /streamer/admin/sessions` | Active sessions; requires the derived admin bearer key. |
+| `DELETE /streamer/admin/sessions/{id}` | Cancel an active session; requires the derived admin bearer key. |
 
-The backend issues playback tokens; this service validates and serves them. Streaming is via Direct Play, remux or transcode, not a standalone library UI. Read [`DESIGN.md`](DESIGN.md) for implementation details and proposed future APIs. HLS/adaptive streaming should not be represented as shipped functionality.
+The backend issues playback tokens; this service validates and serves them. Playback supports Direct Play, remux/transcode, and VOD HLS delivery; this is not a standalone library UI. Read [`DESIGN.md`](DESIGN.md) for implementation details and proposed future APIs.
 
 ## 🔐 Security
 

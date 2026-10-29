@@ -28,6 +28,6 @@ USER streamer
 EXPOSE 8091
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
-    CMD curl -fsS "http://127.0.0.1:${PORT}/healthz" >/dev/null || exit 1
+    CMD curl -fsS "http://127.0.0.1:${PORT}/streamer/healthz" >/dev/null || exit 1
 
 ENTRYPOINT ["/usr/local/bin/flixer-streamer"]

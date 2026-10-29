@@ -25,7 +25,7 @@ Vue client          Flixer API                 Flixer Streamer        Media root
     |                    | choose source and mode     |                    |
     |                    | sign short-lived token    |                    |
     |<-------------------| URL + profile + session    |                    |
-    | GET /stream/{token}                             |                    |
+    | GET /streamer/stream/{token}                    |                    |
     |----------------------------------------------->| verify JWT          |
     |                                                | decrypt locator     |
     |                                                | resolve under root  |
@@ -44,7 +44,7 @@ symlink replacement between path validation and file open.
 
 ## Streamer HTTP contract (implemented)
 
-### `GET` or `HEAD /stream/{token}`
+### `GET` or `HEAD /streamer/stream/{token}`
 
 `token` is a compact JWT. Client-supplied paths are ignored. Optional query
 parameters: `height` (`240`, `360`, `480`, `720` or `1080`; maximum output
@@ -76,7 +76,7 @@ is attempted as before).
 - Successful bodies are `private, no-store`; requests never log the token or
   raw URL.
 
-### `GET /info/{token}[?height=&start=]`
+### `GET /streamer/info/{token}[?height=&start=]`
 
 Same token and options as `/stream`. Returns the mode the stream would use and
 the source details, so a client can show quality choices and a seek bar:
@@ -89,7 +89,7 @@ the source details, so a client can show quality choices and a seek bar:
 }
 ```
 
-### `GET /healthz`
+### `GET /streamer/healthz`
 
 Returns `200 {"status":"ok"}`. It is a process liveness check, not a readiness
 check for a future transcoder or external dependencies.
@@ -186,7 +186,7 @@ Example response:
     "supportsDirectPlay": true,
     "supportsDirectStream": false,
     "supportsTranscoding": false,
-    "streamUrl": "https://streamer.example/stream/{signed-token}",
+    "streamUrl": "https://streamer.example/streamer/stream/{signed-token}",
     "transcodingUrl": null,
     "container": "mp4",
     "bitrate": 4200000,
@@ -257,9 +257,9 @@ streamer logs are therefore required in deployment.
 HLS route shape:
 
 ```text
-GET /hls/{playSessionId}/master.m3u8?token={signed-token}
-GET /hls/{playSessionId}/{variant}/index.m3u8?token={signed-token}
-GET /hls/{playSessionId}/{variant}/{segment}.ts?token={signed-token}
+GET /streamer/hls/{playSessionId}/master.m3u8?token={signed-token}
+GET /streamer/hls/{playSessionId}/{variant}/index.m3u8?token={signed-token}
+GET /streamer/hls/{playSessionId}/{variant}/{segment}.ts?token={signed-token}
 ```
 
 Every route must validate the token and ensure its play-session ID matches the
@@ -343,4 +343,4 @@ structured request logs, but it does not yet enforce per-user quotas.
 
 ## Trickplay thumbnail sheets (implemented)
 
-The streamer serves hover-seek sheets from `TRICKPLAY_DIR` (default `/data/cache/trickplay`), which should be mounted read-only and shared with the indexer's trickplay worker. `GET` and `HEAD /trickplay/{token}/index.json` and `/trickplay/{token}/{n}.jpg` require the usual short-lived stream token. The folder key is the first 32 lowercase hexadecimal characters of `SHA256(rootId + "\n" + relativePath)`. Only `index.json` and decimal-numbered JPEG filenames are accepted; missing files return `404 trickplay_not_available`. Index responses cache privately for five minutes and JPEG sheets for one day; `http.ServeContent` provides range and conditional-request support.
+The streamer serves hover-seek sheets from `TRICKPLAY_DIR` (default `/data/cache/trickplay`), which should be mounted read-only and shared with the indexer's trickplay worker. `GET` and `HEAD /streamer/trickplay/{token}/index.json` and `/streamer/trickplay/{token}/{n}.jpg` require the usual short-lived stream token. The folder key is the first 32 lowercase hexadecimal characters of `SHA256(rootId + "\n" + relativePath)`. Only `index.json` and decimal-numbered JPEG filenames are accepted; missing files return `404 trickplay_not_available`. Index responses cache privately for five minutes and JPEG sheets for one day; `http.ServeContent` provides range and conditional-request support.

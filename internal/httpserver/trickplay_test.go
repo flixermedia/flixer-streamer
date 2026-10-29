@@ -43,17 +43,17 @@ func TestTrickplayServesIndexAndSheetWithValidToken(t *testing.T) {
 		body                             []byte
 	}{{http.MethodGet, "index.json", "application/json", "private, max-age=300", index}, {http.MethodGet, "0.jpg", "image/jpeg", "private, max-age=86400", sheet}} {
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(test.method, "/trickplay/"+streamToken+"/"+test.name, nil))
+		handler.ServeHTTP(response, httptest.NewRequest(test.method, "/streamer/trickplay/"+streamToken+"/"+test.name, nil))
 		if response.Code != http.StatusOK || response.Header().Get("Content-Type") != test.contentType || response.Header().Get("Cache-Control") != test.cache || !bytes.Equal(response.Body.Bytes(), test.body) {
 			t.Errorf("%s response = %d, headers %v, body %q", test.name, response.Code, response.Header(), response.Body.Bytes())
 		}
 	}
 	head := httptest.NewRecorder()
-	handler.ServeHTTP(head, httptest.NewRequest(http.MethodHead, "/trickplay/"+streamToken+"/0.jpg", nil))
+	handler.ServeHTTP(head, httptest.NewRequest(http.MethodHead, "/streamer/trickplay/"+streamToken+"/0.jpg", nil))
 	if head.Code != http.StatusOK || head.Body.Len() != 0 {
 		t.Errorf("HEAD response = %d, body %q", head.Code, head.Body.String())
 	}
-	rangeRequest := httptest.NewRequest(http.MethodGet, "/trickplay/"+streamToken+"/0.jpg", nil)
+	rangeRequest := httptest.NewRequest(http.MethodGet, "/streamer/trickplay/"+streamToken+"/0.jpg", nil)
 	rangeRequest.Header.Set("Range", "bytes=0-3")
 	ranged := httptest.NewRecorder()
 	handler.ServeHTTP(ranged, rangeRequest)
@@ -75,7 +75,7 @@ func TestTrickplayMissingTraversalAndBadToken(t *testing.T) {
 		url  string
 		code int
 		want string
-	}{{"/trickplay/" + valid + "/9.jpg", http.StatusNotFound, "trickplay_not_available"}, {"/trickplay/" + valid + "/../index.json", http.StatusNotFound, "trickplay_not_available"}, {"/trickplay/not-a-token/index.json", http.StatusUnauthorized, "invalid_token"}} {
+	}{{"/streamer/trickplay/" + valid + "/9.jpg", http.StatusNotFound, "trickplay_not_available"}, {"/streamer/trickplay/" + valid + "/../index.json", http.StatusNotFound, "trickplay_not_available"}, {"/streamer/trickplay/not-a-token/index.json", http.StatusUnauthorized, "invalid_token"}} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, test.url, nil))
 		var body map[string]any
@@ -89,7 +89,7 @@ func TestTrickplayMissingTraversalAndBadToken(t *testing.T) {
 func TestTrickplayRejectsUnsupportedMethod(t *testing.T) {
 	handler := NewHandler(Options{Secret: []byte("test-secret-that-is-at-least-thirty-two-bytes")})
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/trickplay/no/index.json", nil))
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/streamer/trickplay/no/index.json", nil))
 	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != "GET, HEAD" {
 		t.Fatalf("POST response = %d, Allow %q", response.Code, response.Header().Get("Allow"))
 	}

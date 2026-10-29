@@ -9,7 +9,7 @@ import (
 	"github.com/flixermedia/flixer-streamer/internal/transcode"
 )
 
-// handleHLS serves /hls/<token>/index.m3u8 and /hls/<token>/<n>.ts. iOS Safari
+// handleHLS serves /streamer/hls/<token>/index.m3u8 and /streamer/hls/<token>/<n>.ts. iOS Safari
 // cannot play the endless fragmented MP4 used elsewhere, so it gets VOD HLS
 // whose segments are encoded on demand.
 func (h *Handler) handleHLS(w http.ResponseWriter, r *http.Request) {

@@ -39,7 +39,7 @@ func TestStreamServesByteRangeWithValidToken(t *testing.T) {
 	})
 
 	token := createStreamToken(t, secret, "movies", "movie.mp4")
-	request := httptest.NewRequest(http.MethodGet, "/stream/"+token, nil)
+	request := httptest.NewRequest(http.MethodGet, "/streamer/stream/"+token, nil)
 	request.Header.Set("Range", "bytes=2-5")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -63,11 +63,20 @@ func TestStreamRejectsMissingOrInvalidToken(t *testing.T) {
 		Secret: []byte("test-secret-that-is-at-least-thirty-two-bytes"),
 		Logger: slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil)),
 	})
-	for _, url := range []string{"/stream/", "/stream/not-a-jwt"} {
+	for _, url := range []string{"/streamer/stream/", "/streamer/stream/not-a-jwt"} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, url, nil))
 		if response.Code != http.StatusUnauthorized {
 			t.Errorf("GET %s status = %d, want %d", url, response.Code, http.StatusUnauthorized)
+		}
+
+	}
+
+	for _, url := range []string{"/stream/not-a-jwt", "/healthz"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, url, nil))
+		if response.Code != http.StatusNotFound {
+			t.Errorf("legacy route GET %s status = %d, want %d", url, response.Code, http.StatusNotFound)
 		}
 	}
 }
@@ -78,7 +87,7 @@ func TestHealthEndpoint(t *testing.T) {
 		Logger: slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil)),
 	})
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/streamer/healthz", nil))
 	if response.Code != http.StatusOK || response.Body.String() != "{\"activeTranscodes\":0,\"status\":\"ok\",\"version\":\"1.2.3\"}\n" {
 		t.Fatalf("health response = %d %q", response.Code, response.Body.String())
 	}
@@ -92,12 +101,12 @@ func TestAdminSessionsRequireKey(t *testing.T) {
 	})
 
 	denied := httptest.NewRecorder()
-	handler.ServeHTTP(denied, httptest.NewRequest(http.MethodGet, "/admin/sessions", nil))
+	handler.ServeHTTP(denied, httptest.NewRequest(http.MethodGet, "/streamer/admin/sessions", nil))
 	if denied.Code != http.StatusUnauthorized {
 		t.Fatalf("no key: status = %d, want 401", denied.Code)
 	}
 
-	request := httptest.NewRequest(http.MethodGet, "/admin/sessions", nil)
+	request := httptest.NewRequest(http.MethodGet, "/streamer/admin/sessions", nil)
 	request.Header.Set("Authorization", "Bearer "+AdminKey(secret))
 	allowed := httptest.NewRecorder()
 	handler.ServeHTTP(allowed, request)
@@ -105,7 +114,7 @@ func TestAdminSessionsRequireKey(t *testing.T) {
 		t.Fatalf("valid key: %d %s", allowed.Code, allowed.Body)
 	}
 
-	del := httptest.NewRequest(http.MethodDelete, "/admin/sessions/missing", nil)
+	del := httptest.NewRequest(http.MethodDelete, "/streamer/admin/sessions/missing", nil)
 	del.Header.Set("Authorization", "Bearer "+AdminKey(secret))
 	missing := httptest.NewRecorder()
 	handler.ServeHTTP(missing, del)
@@ -180,7 +189,7 @@ func TestLyricsPreferStoredCopyOverSidecar(t *testing.T) {
 
 	get := func() string {
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/lyrics/"+tok, nil))
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/streamer/lyrics/"+tok, nil))
 		if response.Code != http.StatusOK {
 			t.Fatalf("status = %d: %s", response.Code, response.Body)
 		}

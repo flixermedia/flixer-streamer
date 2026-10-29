@@ -28,7 +28,7 @@ func (h *Handler) authorizeAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// handleAdmin serves GET /admin/sessions and DELETE /admin/sessions/{id}.
+// handleAdmin serves GET /streamer/admin/sessions and DELETE /streamer/admin/sessions/{id}.
 func (h *Handler) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	if !h.authorizeAdmin(w, r) {
 		return

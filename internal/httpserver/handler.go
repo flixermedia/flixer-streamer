@@ -71,6 +71,11 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusForbidden, "origin_not_allowed", "Origin is not allowed")
 		return
 	}
+	if !strings.HasPrefix(r.URL.Path, "/streamer/") {
+		http.NotFound(w, r)
+		return
+	}
+	r.URL.Path = strings.TrimPrefix(r.URL.Path, "/streamer")
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
