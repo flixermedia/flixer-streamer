@@ -123,6 +123,50 @@ func TestAdminSessionsRequireKey(t *testing.T) {
 	}
 }
 
+func TestAdminTranscodeCleanupRemovesOnlyExpiredFiles(t *testing.T) {
+	secret := []byte("test-secret-that-is-at-least-thirty-two-bytes")
+	cache := t.TempDir()
+	oldPath := filepath.Join(cache, "old.ts")
+	recentPath := filepath.Join(cache, "recent.ts")
+	outsidePath := filepath.Join(t.TempDir(), "outside.ts")
+	for _, path := range []string{oldPath, recentPath, outsidePath} {
+		if err := os.WriteFile(path, []byte("cache"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(oldPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsidePath, filepath.Join(cache, "outside-link")); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(Options{Secret: secret, TranscodeDir: cache})
+
+	denied := httptest.NewRecorder()
+	handler.ServeHTTP(denied, httptest.NewRequest(http.MethodPost, "/streamer/admin/transcode-cache/cleanup", nil))
+	if denied.Code != http.StatusUnauthorized {
+		t.Fatalf("missing key: status = %d, want %d", denied.Code, http.StatusUnauthorized)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/streamer/admin/transcode-cache/cleanup", nil)
+	request.Header.Set("Authorization", "Bearer "+AdminKey(secret))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != "{\"removed\":1}\n" {
+		t.Fatalf("cleanup response = %d %q", response.Code, response.Body.String())
+	}
+	for _, path := range []string{oldPath, recentPath, outsidePath} {
+		_, err := os.Stat(path)
+		if path == oldPath && !os.IsNotExist(err) {
+			t.Errorf("expired file still exists (err = %v)", err)
+		}
+		if path != oldPath && err != nil {
+			t.Errorf("preserved file %q is unavailable: %v", path, err)
+		}
+	}
+}
+
 func createStreamToken(t *testing.T, secret []byte, rootID, relativePath string) string {
 	t.Helper()
 	locator, err := json.Marshal(token.Locator{RootID: rootID, RelativePath: relativePath})

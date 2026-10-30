@@ -84,6 +84,7 @@ func main() {
 	handler := httpserver.NewHandler(httpserver.Options{
 		Secret:         []byte(cfg.TokenSecret),
 		Resolver:       resolver,
+		TranscodeDir:   cfg.TranscodeDir,
 		TrickplayDir:   cfg.TrickplayDir,
 		SubtitleDir:    cfg.SubtitleDir,
 		LyricsDir:      cfg.LyricsDir,

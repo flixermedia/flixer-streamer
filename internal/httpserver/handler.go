@@ -23,6 +23,7 @@ import (
 type Options struct {
 	Secret       []byte
 	Resolver     *media.Resolver
+	TranscodeDir string
 	TrickplayDir string
 	// SubtitleDir holds subtitles the indexer stored for videos in read-only media folders.
 	SubtitleDir string
@@ -36,6 +37,7 @@ type Options struct {
 type Handler struct {
 	secret         []byte
 	resolver       *media.Resolver
+	transcodeDir   string
 	trickplayDir   string
 	subtitleDir    string
 	lyricsDir      string
@@ -56,6 +58,7 @@ func NewHandler(options Options) http.Handler {
 	h := &Handler{
 		secret:         options.Secret,
 		resolver:       options.Resolver,
+		transcodeDir:   options.TranscodeDir,
 		trickplayDir:   options.TrickplayDir,
 		subtitleDir:    options.SubtitleDir,
 		lyricsDir:      options.LyricsDir,
