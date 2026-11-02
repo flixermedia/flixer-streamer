@@ -36,15 +36,22 @@ func (h *Handler) handleHLS(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "invalid_options", err.Error())
 		return
 	}
-	path, probe, _, ok := h.prepare(w, r, locator, transcode.Options{})
+	path, probe, _, ok := h.prepare(w, r, locator, options)
 	if !ok {
 		return
 	}
 
 	if file == "index.m3u8" {
-		query := ""
+		queryValues := url.Values{}
 		if options.Height > 0 {
-			query = "?" + url.Values{"height": {strconv.Itoa(options.Height)}}.Encode()
+			queryValues.Set("height", strconv.Itoa(options.Height))
+		}
+		if options.AudioStreamIndex != nil {
+			queryValues.Set("audioTrack", strconv.Itoa(*options.AudioStreamIndex))
+		}
+		query := ""
+		if encoded := queryValues.Encode(); encoded != "" {
+			query = "?" + encoded
 		}
 		if transcode.SegmentCount(probe) == 0 {
 			h.writeError(w, http.StatusUnprocessableEntity, "unknown_duration", "Media duration is unknown")
@@ -62,7 +69,8 @@ func (h *Handler) handleHLS(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusNotFound, "not_found", "Not found")
 		return
 	}
-	plan, err := transcode.BuildSegmentPlan(path, probe, index, options.Height, h.transcoder.Settings())
+	options.Encoder = h.transcoder.Settings()
+	plan, err := transcode.BuildSegmentPlan(path, probe, index, options)
 	if err != nil {
 		h.writeError(w, http.StatusNotFound, "not_found", "Segment is out of range")
 		return

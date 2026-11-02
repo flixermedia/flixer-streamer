@@ -44,8 +44,10 @@ type Claims struct {
 }
 
 type Locator struct {
+	Type         string `json:"type,omitempty"`
 	RootID       string `json:"rootId"`
 	RelativePath string `json:"relativePath"`
+	URL          string `json:"url,omitempty"`
 }
 
 type header struct {
@@ -159,8 +161,21 @@ func DecryptLocator(encoded string, secret []byte) (Locator, error) {
 	if err := json.Unmarshal(plaintext, &locator); err != nil {
 		return locator, errors.New("invalid decrypted media locator")
 	}
-	if locator.RootID == "" || locator.RelativePath == "" {
-		return Locator{}, errors.New("media locator is incomplete")
+	switch locator.Type {
+	case "":
+		if locator.RootID == "" || locator.RelativePath == "" || locator.URL != "" {
+			return Locator{}, errors.New("media locator is incomplete")
+		}
+	case "iptv":
+		if locator.URL == "" || locator.RootID != "" || locator.RelativePath != "" {
+			return Locator{}, errors.New("media locator is incomplete")
+		}
+	default:
+		return Locator{}, errors.New("unsupported media locator type")
 	}
 	return locator, nil
+}
+
+func (locator Locator) IsIPTV() bool {
+	return locator.Type == "iptv"
 }

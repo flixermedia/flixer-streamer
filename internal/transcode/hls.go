@@ -20,7 +20,7 @@ func SegmentCount(probe Probe) int {
 }
 
 // BuildPlaylist renders the VOD playlist. query is appended to each segment URI
-// so the selected height carries over.
+// so the selected height and audio track carry over.
 func BuildPlaylist(probe Probe, query string) string {
 	count := SegmentCount(probe)
 	var b strings.Builder
@@ -42,23 +42,30 @@ func BuildPlaylist(probe Probe, query string) string {
 // BuildSegmentPlan returns ffmpeg arguments that encode one H.264/AAC MPEG-TS
 // segment. Video is always re-encoded so every segment starts on a keyframe,
 // and timestamps are offset so segments join seamlessly.
-func BuildSegmentPlan(inputPath string, probe Probe, index int, height int, encoder Settings) (Plan, error) {
-	if !ValidHeight(height) || index < 0 || index >= SegmentCount(probe) {
+func BuildSegmentPlan(inputPath string, probe Probe, index int, options Options) (Plan, error) {
+	if !ValidHeight(options.Height) || index < 0 || index >= SegmentCount(probe) {
+		return Plan{}, ErrInvalidArgs
+	}
+	if options.AudioStreamIndex != nil && !probe.HasAudioTrack(*options.AudioStreamIndex) {
 		return Plan{}, ErrInvalidArgs
 	}
 	start := strconv.FormatFloat(float64(index*SegmentSeconds), 'f', 3, 64)
-	args := append([]string{"-hide_banner", "-nostdin"}, encoder.inputArgs()...)
+	args := append([]string{"-hide_banner", "-nostdin"}, options.Encoder.inputArgs()...)
+	audioMap := "0:a:0?"
+	if options.AudioStreamIndex != nil {
+		audioMap = "0:" + strconv.Itoa(*options.AudioStreamIndex)
+	}
 	args = append(args,
 		"-ss", start, "-i", inputPath, "-t", strconv.Itoa(SegmentSeconds),
-		"-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
+		"-map", "0:v:0", "-map", audioMap, "-sn", "-dn",
 	)
-	args = append(args, encoder.videoArgs()...)
+	args = append(args, options.Encoder.videoArgs()...)
 	args = append(args, "-force_key_frames", "0")
 	scaleHeight := 0
-	if needsScaling(probe, Options{Height: height}) {
-		scaleHeight = height
+	if needsScaling(probe, options) {
+		scaleHeight = options.Height
 	}
-	if filter := encoder.videoFilter(scaleHeight); filter != "" {
+	if filter := options.Encoder.videoFilter(scaleHeight); filter != "" {
 		args = append(args, "-vf", filter)
 	}
 	args = append(args,
@@ -66,5 +73,5 @@ func BuildSegmentPlan(inputPath string, probe Probe, index int, height int, enco
 		"-output_ts_offset", start, "-muxdelay", "0",
 		"-f", "mpegts", "pipe:1",
 	)
-	return Plan{Mode: ModeTranscode, ContentType: "video/mp2t", Args: args, Height: height, Position: float64(index * SegmentSeconds)}, nil
+	return Plan{Mode: ModeTranscode, ContentType: "video/mp2t", Args: args, Height: options.Height, Position: float64(index * SegmentSeconds)}, nil
 }

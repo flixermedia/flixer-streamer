@@ -42,11 +42,30 @@ var (
 )
 
 type Probe struct {
-	VideoCodec string  `json:"videoCodec"`
-	AudioCodec string  `json:"audioCodec,omitempty"`
-	Width      int     `json:"width"`
-	Height     int     `json:"height"`
-	Duration   float64 `json:"durationSeconds"`
+	VideoCodec  string       `json:"videoCodec"`
+	AudioCodec  string       `json:"audioCodec,omitempty"`
+	AudioTracks []AudioTrack `json:"audioTracks"`
+	Width       int          `json:"width"`
+	Height      int          `json:"height"`
+	Duration    float64      `json:"durationSeconds"`
+}
+
+type AudioTrack struct {
+	Index    int    `json:"index"`
+	Codec    string `json:"codec"`
+	Language string `json:"language,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Channels int    `json:"channels,omitempty"`
+	Default  bool   `json:"default"`
+}
+
+func (p Probe) HasAudioTrack(index int) bool {
+	for _, track := range p.AudioTracks {
+		if track.Index == index {
+			return true
+		}
+	}
+	return false
 }
 
 type Options struct {
@@ -57,6 +76,8 @@ type Options struct {
 	// KeyframeStart marks StartSeconds as a video keyframe position, so a
 	// stream-copy output begins exactly there for both audio and video.
 	KeyframeStart bool
+	// AudioStreamIndex selects an audio stream by its absolute container index.
+	AudioStreamIndex *int
 	// Encoder holds the admin's video encoder settings; the zero value means the defaults.
 	Encoder Settings
 }
@@ -100,7 +121,7 @@ func Decide(fileName string, probe Probe, options Options) Mode {
 	if !copyableVideo(probe.VideoCodec) {
 		return ModeTranscode
 	}
-	if DirectPlayable(fileName) && options.StartSeconds == 0 {
+	if DirectPlayable(fileName) && options.StartSeconds == 0 && options.AudioStreamIndex == nil {
 		return ModeDirectPlay
 	}
 	return ModeRemux
@@ -127,6 +148,9 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 	if !ValidHeight(options.Height) || options.StartSeconds < 0 {
 		return Plan{}, ErrInvalidArgs
 	}
+	if options.AudioStreamIndex != nil && !probe.HasAudioTrack(*options.AudioStreamIndex) {
+		return Plan{}, ErrInvalidArgs
+	}
 
 	args := []string{"-hide_banner", "-nostdin"}
 	if mode == ModeTranscode {
@@ -141,7 +165,18 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 		// seek point (often ~10s earlier), shifting the timeline.
 		args = append(args, "-copypriorss", "0")
 	}
-	args = append(args, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn")
+	audioMap := "0:a:0?"
+	audioCodec := probe.AudioCodec
+	if options.AudioStreamIndex != nil {
+		audioMap = "0:" + strconv.Itoa(*options.AudioStreamIndex)
+		for _, track := range probe.AudioTracks {
+			if track.Index == *options.AudioStreamIndex {
+				audioCodec = track.Codec
+				break
+			}
+		}
+	}
+	args = append(args, "-map", "0:v:0", "-map", audioMap, "-sn", "-dn")
 
 	webm := mode == ModeRemux && probe.VideoCodec != "h264"
 	if mode == ModeRemux {
@@ -158,7 +193,7 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 	}
 
 	if webm {
-		if probe.AudioCodec == "opus" || probe.AudioCodec == "vorbis" {
+		if audioCodec == "opus" || audioCodec == "vorbis" {
 			args = append(args, "-c:a", "copy")
 		} else {
 			args = append(args, "-c:a", "libopus", "-b:a", "128k", "-ac", "2")
@@ -167,7 +202,7 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 		return Plan{Mode: mode, ContentType: "video/webm", Args: args, Height: options.Height, Position: options.StartSeconds}, nil
 	}
 
-	if probe.AudioCodec == "aac" && mode == ModeRemux {
+	if audioCodec == "aac" && mode == ModeRemux {
 		args = append(args, "-c:a", "copy")
 	} else {
 		args = append(args, "-c:a", "aac", "-b:a", "160k", "-ac", "2")
@@ -236,10 +271,19 @@ func New(ffmpegPath, ffprobePath string, maxConcurrent int, logger *slog.Logger,
 
 type probeOutput struct {
 	Streams []struct {
+		Index     int    `json:"index"`
 		CodecType string `json:"codec_type"`
 		CodecName string `json:"codec_name"`
+		Channels  int    `json:"channels"`
 		Width     int    `json:"width"`
 		Height    int    `json:"height"`
+		Tags      struct {
+			Language string `json:"language"`
+			Title    string `json:"title"`
+		} `json:"tags"`
+		Disposition struct {
+			Default int `json:"default"`
+		} `json:"disposition"`
 	} `json:"streams"`
 	Format struct {
 		Duration string `json:"duration"`
@@ -258,17 +302,35 @@ func (t *Transcoder) Probe(ctx context.Context, path string) (Probe, error) {
 		return Probe{}, fmt.Errorf("ffprobe: %w", err)
 	}
 
-	var parsed probeOutput
-	if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil {
+	probe, err := parseProbeOutput(stdout.Bytes())
+	if err != nil {
 		return Probe{}, fmt.Errorf("parse ffprobe output: %w", err)
 	}
-	var probe Probe
+	return probe, nil
+}
+
+func parseProbeOutput(data []byte) (Probe, error) {
+	var parsed probeOutput
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return Probe{}, err
+	}
+	probe := Probe{AudioTracks: []AudioTrack{}}
 	for _, stream := range parsed.Streams {
 		switch {
 		case stream.CodecType == "video" && probe.VideoCodec == "":
 			probe.VideoCodec, probe.Width, probe.Height = stream.CodecName, stream.Width, stream.Height
-		case stream.CodecType == "audio" && probe.AudioCodec == "":
-			probe.AudioCodec = stream.CodecName
+		case stream.CodecType == "audio":
+			if probe.AudioCodec == "" {
+				probe.AudioCodec = stream.CodecName
+			}
+			probe.AudioTracks = append(probe.AudioTracks, AudioTrack{
+				Index:    stream.Index,
+				Codec:    stream.CodecName,
+				Language: stream.Tags.Language,
+				Title:    stream.Tags.Title,
+				Channels: stream.Channels,
+				Default:  stream.Disposition.Default == 1,
+			})
 		}
 	}
 	if probe.VideoCodec == "" {

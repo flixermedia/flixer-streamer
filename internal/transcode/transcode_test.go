@@ -6,6 +6,8 @@ import (
 	"testing"
 )
 
+func intPointer(value int) *int { return &value }
+
 func TestDecide(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -22,7 +24,9 @@ func TestDecide(t *testing.T) {
 		{"no upscaling", "a.mp4", Probe{VideoCodec: "h264", Height: 720}, Options{Height: 1080}, ModeDirectPlay},
 		{"same height", "a.mkv", Probe{VideoCodec: "h264", Height: 720}, Options{Height: 720}, ModeRemux},
 		{"start offset needs ffmpeg", "a.mp4", Probe{VideoCodec: "h264", Height: 720}, Options{StartSeconds: 4}, ModeRemux},
+		{"audio selection needs ffmpeg", "a.mp4", Probe{VideoCodec: "h264", Height: 720}, Options{AudioStreamIndex: intPointer(2)}, ModeRemux},
 	}
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if got := Decide(test.file, test.probe, test.options); got != test.want {
@@ -76,5 +80,42 @@ func TestBuildPlanRejectsInvalidOptions(t *testing.T) {
 	}
 	if _, err := BuildPlan("in.mp4", Probe{VideoCodec: "h264"}, ModeDirectPlay, Options{}); !errors.Is(err, ErrInvalidArgs) {
 		t.Fatalf("expected ErrInvalidArgs, got %v", err)
+	}
+	if _, err := BuildPlan("in.mp4", Probe{VideoCodec: "h264"}, ModeRemux, Options{AudioStreamIndex: intPointer(2)}); !errors.Is(err, ErrInvalidArgs) {
+		t.Fatalf("expected invalid audio track to return ErrInvalidArgs, got %v", err)
+	}
+}
+
+func TestBuildPlanMapsSelectedAudioStream(t *testing.T) {
+	probe := Probe{
+		VideoCodec: "h264",
+		AudioTracks: []AudioTrack{
+			{Index: 1, Codec: "aac"},
+			{Index: 3, Codec: "ac3"},
+		},
+	}
+	plan, err := BuildPlan("in.mkv", probe, ModeRemux, Options{AudioStreamIndex: intPointer(3)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(plan.Args, "0:3") || !slices.Contains(plan.Args, "aac") {
+		t.Fatalf("selected audio stream was not mapped and encoded: %v", plan.Args)
+	}
+}
+
+func TestParseProbeOutputIncludesAudioMetadata(t *testing.T) {
+	probe, err := parseProbeOutput([]byte(`{
+		"streams": [
+			{"index": 0, "codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080},
+			{"index": 1, "codec_type": "audio", "codec_name": "aac", "channels": 2, "tags": {"language": "eng", "title": "Stereo"}, "disposition": {"default": 1}},
+			{"index": 2, "codec_type": "audio", "codec_name": "ac3", "channels": 6, "tags": {"language": "jpn"}, "disposition": {"default": 0}}
+		],
+		"format": {"duration": "90.5"}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probe.AudioCodec != "aac" || len(probe.AudioTracks) != 2 || probe.AudioTracks[1].Index != 2 || probe.AudioTracks[0].Language != "eng" || !probe.AudioTracks[0].Default || probe.AudioTracks[1].Channels != 6 {
+		t.Fatalf("unexpected probe: %+v", probe)
 	}
 }

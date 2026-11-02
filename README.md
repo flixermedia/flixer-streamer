@@ -26,6 +26,7 @@
 - **Direct Stream:** FFmpeg remuxing to fragmented MP4 or WebM.
 - **Transcoding:** H.264/AAC conversion and requested output-height limits.
 - **Protected playback:** Signed JWTs and encrypted media locators.
+- **IPTV live HLS:** Refreshable playlists and proxied segments with public-address-only upstream validation.
 - **Multiple media roots:** Server-controlled locations and filesystem containment checks.
 - **Trickplay:** Private delivery of thumbnail sheets produced by the indexer.
 
@@ -78,17 +79,19 @@ See [`.env.example`](.env.example) for complete options.
 | `GET /streamer/info/{token}` | Playback information. |
 | `GET, HEAD /streamer/stream/{token}` | Authorized media delivery; `height` and `start` options. |
 | `GET, HEAD /streamer/hls/{token}/...` | Authorized VOD HLS playlist and segments. |
+| `GET /streamer/live/{token}` | Authorized IPTV live HLS playlist; refresh to load current live media. |
+| `GET /streamer/live/{token}/resource/{id}` | Opaque, playlist-issued HLS resource proxy. |
 | `GET /streamer/lyrics/{token}` | Sidecar lyrics. |
 | `GET /streamer/subtitles/{token}` | Sidecar subtitle listing or file. |
 | `GET, HEAD /streamer/trickplay/{token}/...` | Authorized thumbnail retrieval. |
 | `GET /streamer/admin/sessions` | Active sessions; requires the derived admin bearer key. |
 | `DELETE /streamer/admin/sessions/{id}` | Cancel an active session; requires the derived admin bearer key. |
 
-The backend issues playback tokens; this service validates and serves them. Playback supports Direct Play, remux/transcode, and VOD HLS delivery; this is not a standalone library UI. Read [`DESIGN.md`](DESIGN.md) for implementation details and proposed future APIs.
+The backend issues playback tokens; this service validates and serves them. Playback supports Direct Play, remux/transcode, VOD HLS, and signed IPTV live HLS delivery; this is not a standalone library UI. Read [`DESIGN.md`](DESIGN.md) for implementation details and proposed future APIs.
 
 ## 🔐 Security
 
-Use HTTPS, private media mounts, restricted filesystem permissions, short-lived signed URLs and a strong matching `APP_SECRET`. Keep the service behind the trusted stack's proxy.
+Use HTTPS, private media mounts, restricted filesystem permissions, short-lived signed URLs and a strong matching `APP_SECRET`. Live HLS proxy requests accept only HTTP(S) upstreams on ports 80, 443, 8080, or 8443, resolve and pin public IP addresses, and validate redirects; they cannot access private or local network addresses. Keep the service behind the trusted stack's proxy.
 
 ## 🧩 Flixer ecosystem
 

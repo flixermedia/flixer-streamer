@@ -42,6 +42,7 @@ type Handler struct {
 	subtitleDir    string
 	lyricsDir      string
 	transcoder     *transcode.Transcoder
+	live           *liveProxy
 	allowedOrigins map[string]struct{}
 	logger         *slog.Logger
 }
@@ -63,6 +64,7 @@ func NewHandler(options Options) http.Handler {
 		subtitleDir:    options.SubtitleDir,
 		lyricsDir:      options.LyricsDir,
 		transcoder:     options.Transcoder,
+		live:           newLiveProxy(),
 		allowedOrigins: origins,
 		logger:         logger,
 	}
@@ -93,6 +95,10 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) {
 	case "/stream/", "/stream":
 		h.writeError(w, http.StatusUnauthorized, "invalid_token", "A valid stream token is required")
 	default:
+		if strings.HasPrefix(r.URL.Path, "/live/") {
+			h.handleLive(w, r)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/stream/") {
 			h.handleStream(w, r)
 			return
@@ -165,7 +171,7 @@ func (h *Handler) authorizeToken(w http.ResponseWriter, rawToken string) (token.
 		return token.Locator{}, token.Claims{}, false
 	}
 	locator, err := token.DecryptLocator(claims.MediaLocator, h.secret)
-	if err != nil {
+	if err != nil || locator.IsIPTV() {
 		h.writeError(w, http.StatusUnauthorized, "invalid_token", "A valid stream token is required")
 		return token.Locator{}, token.Claims{}, false
 	}
@@ -207,6 +213,13 @@ func parseOptions(r *http.Request) (transcode.Options, error) {
 		}
 		options.StartSeconds = start
 	}
+	if value := query.Get("audioTrack"); value != "" {
+		index, err := strconv.Atoi(value)
+		if err != nil || index < 0 {
+			return options, errors.New("audioTrack must be a non-negative stream index")
+		}
+		options.AudioStreamIndex = &index
+	}
 	return options, nil
 }
 
@@ -226,6 +239,10 @@ func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, locator token.
 	if err != nil {
 		h.logger.Error("probe media failed", "error", err)
 		h.writeError(w, http.StatusInternalServerError, "stream_failed", "Unable to inspect media")
+		return
+	}
+	if options.AudioStreamIndex != nil && !probe.HasAudioTrack(*options.AudioStreamIndex) {
+		h.writeError(w, http.StatusBadRequest, "invalid_options", "audioTrack must refer to an available audio stream")
 		return
 	}
 	return path, probe, transcode.Decide(filepath.Base(path), probe, options), true
@@ -312,7 +329,7 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 			h.streamProcessed(w, r, path, probe, mode, options, sessionMeta(r, claims, locator, probe, "progressive"))
 			return
 		}
-	} else if options.Height != 0 || options.StartSeconds != 0 {
+	} else if options.Height != 0 || options.StartSeconds != 0 || options.AudioStreamIndex != nil {
 		h.writeError(w, http.StatusNotImplemented, "transcoding_unavailable", "ffmpeg is not available on this streamer")
 		return
 	}
@@ -457,6 +474,8 @@ func (h *Handler) withLogging(next http.Handler) http.Handler {
 			route = "/healthz"
 		} else if strings.HasPrefix(r.URL.Path, "/stream/") {
 			route = "/stream/{token}"
+		} else if strings.HasPrefix(r.URL.Path, "/live/") {
+			route = "/live/{token}"
 		} else if strings.HasPrefix(r.URL.Path, "/info/") {
 			route = "/info/{token}"
 		}

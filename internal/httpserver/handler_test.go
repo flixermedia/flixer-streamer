@@ -167,6 +167,21 @@ func TestAdminTranscodeCleanupRemovesOnlyExpiredFiles(t *testing.T) {
 	}
 }
 
+func TestParseAudioTrackOption(t *testing.T) {
+	options, err := parseOptions(httptest.NewRequest(http.MethodGet, "/?audioTrack=3", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.AudioStreamIndex == nil || *options.AudioStreamIndex != 3 {
+		t.Fatalf("audio stream index = %v, want 3", options.AudioStreamIndex)
+	}
+	for _, value := range []string{"-1", "invalid"} {
+		if _, err := parseOptions(httptest.NewRequest(http.MethodGet, "/?audioTrack="+value, nil)); err == nil {
+			t.Errorf("audioTrack=%s should be rejected", value)
+		}
+	}
+}
+
 func createStreamToken(t *testing.T, secret []byte, rootID, relativePath string) string {
 	t.Helper()
 	locator, err := json.Marshal(token.Locator{RootID: rootID, RelativePath: relativePath})
