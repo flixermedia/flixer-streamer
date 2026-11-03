@@ -83,7 +83,11 @@ See [`.env.example`](.env.example) for complete options.
 | `GET /streamer/live/{token}/resource/{id}` | Opaque, playlist-issued HLS resource proxy. |
 | `GET /streamer/lyrics/{token}` | Sidecar lyrics. |
 | `GET /streamer/subtitles/{token}` | Sidecar subtitle listing or file. |
-| `GET, HEAD /streamer/trickplay/{token}/...` | Authorized thumbnail retrieval. |
+| `GET, HEAD /streamer/trickplay/{token}/tiles.m3u8` | Authorized HLS image playlist for hover-preview thumbnails. Playlist tile URLs resolve to `/{width}/{tile}.jpg`. |
+| `GET, HEAD /streamer/trickplay/{token}/index.json` | Legacy trickplay metadata endpoint. |
+| `GET, HEAD /streamer/trickplay/{token}/{tile}.jpg` | Legacy thumbnail-sheet endpoint. |
+
+When Flixer's generated cache has no trickplay for a video, the streamer can read Jellyscrub's media-side files from the sibling `trickplay/` directory: `<media-basename>-manifest.json` and `<media-basename>-<width>.bif`. It reads the BIF index directly and serves each embedded JPEG through the authenticated HLS image-playlist routes; no conversion or write access to the media library is needed. Flixer's own generated cache takes precedence.
 | `GET /streamer/admin/sessions` | Active sessions; requires the derived admin bearer key. |
 | `DELETE /streamer/admin/sessions/{id}` | Cancel an active session; requires the derived admin bearer key. |
 
