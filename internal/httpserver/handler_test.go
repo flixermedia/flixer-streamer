@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -178,6 +179,24 @@ func TestParseAudioTrackOption(t *testing.T) {
 	for _, value := range []string{"-1", "invalid"} {
 		if _, err := parseOptions(httptest.NewRequest(http.MethodGet, "/?audioTrack="+value, nil)); err == nil {
 			t.Errorf("audioTrack=%s should be rejected", value)
+		}
+	}
+}
+
+func TestParseAudioBitrateOption(t *testing.T) {
+	for _, bitrate := range []int{128, 160, 192, 224, 256, 320} {
+		options, err := parseOptions(httptest.NewRequest(http.MethodGet, "/?audioBitrate="+strconv.Itoa(bitrate), nil))
+		if err != nil {
+			t.Errorf("bitrate %d: %v", bitrate, err)
+			continue
+		}
+		if options.AudioBitrateKbps != bitrate {
+			t.Errorf("bitrate = %d, want %d", options.AudioBitrateKbps, bitrate)
+		}
+	}
+	for _, value := range []string{"127", "129", "321", "invalid"} {
+		if _, err := parseOptions(httptest.NewRequest(http.MethodGet, "/?audioBitrate="+value, nil)); err == nil {
+			t.Errorf("audioBitrate=%s should be rejected", value)
 		}
 	}
 }

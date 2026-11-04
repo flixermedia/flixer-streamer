@@ -220,6 +220,13 @@ func parseOptions(r *http.Request) (transcode.Options, error) {
 		}
 		options.AudioStreamIndex = &index
 	}
+	if value := query.Get("audioBitrate"); value != "" {
+		bitrate, err := strconv.Atoi(value)
+		if err != nil || !transcode.ValidAudioBitrate(bitrate) {
+			return options, errors.New("audioBitrate must be one of 128, 160, 192, 224, 256, 320")
+		}
+		options.AudioBitrateKbps = bitrate
+	}
 	return options, nil
 }
 
@@ -317,6 +324,35 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 	options, err := parseOptions(r)
 	if err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_options", err.Error())
+		return
+	}
+
+	if options.AudioBitrateKbps != 0 {
+		if !isAudioFile(locator.RelativePath) {
+			h.writeError(w, http.StatusBadRequest, "invalid_options", "audioBitrate can only be used with audio files")
+			return
+		}
+		if h.transcoder == nil {
+			h.writeError(w, http.StatusNotImplemented, "transcoding_unavailable", "ffmpeg is not available on this streamer")
+			return
+		}
+		path, err := h.resolver.Resolve(locator.RootID, locator.RelativePath)
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, media.ErrInvalidLocator) {
+			h.writeError(w, http.StatusNotFound, "media_not_found", "Media is not available")
+			return
+		}
+		if err != nil {
+			h.logger.Error("resolve audio media failed", "error", err)
+			h.writeError(w, http.StatusInternalServerError, "stream_failed", "Unable to serve media")
+			return
+		}
+		plan, err := transcode.BuildAudioPlan(path, options.AudioBitrateKbps)
+		if err != nil {
+			h.writeError(w, http.StatusBadRequest, "invalid_options", "Unsupported audio bitrate")
+			return
+		}
+		plan.Meta = sessionMeta(r, claims, locator, transcode.Probe{}, "progressive")
+		h.finishStream(w, r, plan, plan.Mode, "5")
 		return
 	}
 

@@ -33,6 +33,9 @@ const (
 // AllowedHeights are the output heights a client may request.
 var AllowedHeights = []int{240, 360, 480, 720, 1080}
 
+// AllowedAudioBitrates are the MPEG-1 Layer III CBR rates supported for native audio playback.
+var AllowedAudioBitrates = []int{128, 160, 192, 224, 256, 320}
+
 // slotWait lets a replaced request (resolution change, seek) release its slot before we reject.
 const slotWait = 10 * time.Second
 
@@ -71,6 +74,8 @@ func (p Probe) HasAudioTrack(index int) bool {
 type Options struct {
 	// Height is the maximum output height; 0 keeps the source resolution.
 	Height int
+	// AudioBitrateKbps requests an MPEG-1 Layer III CBR audio stream; 0 leaves audio unchanged.
+	AudioBitrateKbps int
 	// StartSeconds is the offset to begin streaming from.
 	StartSeconds float64
 	// KeyframeStart marks StartSeconds as a video keyframe position, so a
@@ -98,6 +103,15 @@ func ValidHeight(height int) bool {
 	}
 	for _, allowed := range AllowedHeights {
 		if height == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func ValidAudioBitrate(bitrate int) bool {
+	for _, allowed := range AllowedAudioBitrates {
+		if bitrate == allowed {
 			return true
 		}
 	}
@@ -212,6 +226,33 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 		"-f", "mp4", "pipe:1",
 	)
 	return Plan{Mode: mode, ContentType: "video/mp4", Args: args, Height: options.Height, Position: options.StartSeconds}, nil
+}
+
+// BuildAudioPlan encodes an audio source as 44.1 kHz stereo MPEG-1 Layer III CBR.
+func BuildAudioPlan(inputPath string, bitrate int) (Plan, error) {
+	if !ValidAudioBitrate(bitrate) {
+		return Plan{}, ErrInvalidArgs
+	}
+
+	rate := strconv.Itoa(bitrate) + "k"
+	return Plan{
+		Mode:        ModeTranscode,
+		ContentType: "audio/mpeg",
+		Args: []string{
+			"-hide_banner", "-nostdin",
+			"-i", inputPath,
+			"-map", "0:a:0",
+			"-vn", "-sn", "-dn",
+			"-c:a", "libmp3lame",
+			"-b:a", rate,
+			"-minrate", rate,
+			"-maxrate", rate,
+			"-bufsize", rate,
+			"-ar", "44100",
+			"-ac", "2",
+			"-f", "mp3", "pipe:1",
+		},
+	}, nil
 }
 
 type Transcoder struct {

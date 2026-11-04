@@ -86,6 +86,32 @@ func TestBuildPlanRejectsInvalidOptions(t *testing.T) {
 	}
 }
 
+func TestBuildAudioPlanProducesMPEG1Layer3CBR(t *testing.T) {
+	plan, err := BuildAudioPlan("in.flac", 320)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Mode != ModeTranscode || plan.ContentType != "audio/mpeg" {
+		t.Fatalf("unexpected plan: %+v", plan)
+	}
+	for _, want := range []string{"libmp3lame", "320k", "-ar", "44100", "-ac", "2", "-f", "mp3", "pipe:1"} {
+		if !slices.Contains(plan.Args, want) {
+			t.Errorf("missing %q in %v", want, plan.Args)
+		}
+	}
+	if !slices.Contains(plan.Args, "-minrate") || !slices.Contains(plan.Args, "-maxrate") {
+		t.Fatalf("MP3 plan does not set constant bitrate bounds: %v", plan.Args)
+	}
+}
+
+func TestBuildAudioPlanRejectsUnsupportedBitrate(t *testing.T) {
+	for _, bitrate := range []int{0, 127, 129, 321} {
+		if _, err := BuildAudioPlan("in.flac", bitrate); !errors.Is(err, ErrInvalidArgs) {
+			t.Errorf("bitrate %d: expected ErrInvalidArgs, got %v", bitrate, err)
+		}
+	}
+}
+
 func TestBuildPlanMapsSelectedAudioStream(t *testing.T) {
 	probe := Probe{
 		VideoCodec: "h264",
