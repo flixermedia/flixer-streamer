@@ -3,6 +3,7 @@ package transcode
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -87,7 +88,7 @@ func TestBuildPlanRejectsInvalidOptions(t *testing.T) {
 }
 
 func TestBuildAudioPlanProducesMPEG1Layer3CBR(t *testing.T) {
-	plan, err := BuildAudioPlan("in.flac", 320)
+	plan, err := BuildAudioPlan("in.flac", 320, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,9 +105,23 @@ func TestBuildAudioPlanProducesMPEG1Layer3CBR(t *testing.T) {
 	}
 }
 
+func TestBuildAudioPlanSeeksBeforeTheInput(t *testing.T) {
+	plan, err := BuildAudioPlan("in.flac", 192, 83.5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(plan.Args, " ")
+	if !strings.Contains(args, "-ss 83.500 -i in.flac") {
+		t.Fatalf("args = %s", args)
+	}
+	if plan.Position != 83.5 {
+		t.Fatalf("position = %v", plan.Position)
+	}
+}
+
 func TestBuildAudioPlanRejectsUnsupportedBitrate(t *testing.T) {
 	for _, bitrate := range []int{0, 127, 129, 321} {
-		if _, err := BuildAudioPlan("in.flac", bitrate); !errors.Is(err, ErrInvalidArgs) {
+		if _, err := BuildAudioPlan("in.flac", bitrate, 0); !errors.Is(err, ErrInvalidArgs) {
 			t.Errorf("bitrate %d: expected ErrInvalidArgs, got %v", bitrate, err)
 		}
 	}

@@ -95,7 +95,12 @@ type Plan struct {
 	Meta     SessionMeta
 	Height   int
 	Position float64
+	// Encrypt, when set, AES-128-CBC encrypts the output (HLS segments).
+	Encrypt *Encryption
 }
+
+// Encryption holds the AES-128 key and IV for an encrypted HLS segment.
+type Encryption struct{ Key, IV []byte }
 
 func ValidHeight(height int) bool {
 	if height == 0 {
@@ -229,17 +234,22 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 }
 
 // BuildAudioPlan encodes an audio source as 44.1 kHz stereo MPEG-1 Layer III CBR.
-func BuildAudioPlan(inputPath string, bitrate int) (Plan, error) {
-	if !ValidAudioBitrate(bitrate) {
+// A positive startSeconds begins the stream at that offset, which is how the player seeks in a stream of unknown length.
+func BuildAudioPlan(inputPath string, bitrate int, startSeconds float64) (Plan, error) {
+	if !ValidAudioBitrate(bitrate) || startSeconds < 0 {
 		return Plan{}, ErrInvalidArgs
 	}
 
 	rate := strconv.Itoa(bitrate) + "k"
+	input := []string{"-hide_banner", "-nostdin"}
+	if startSeconds > 0 {
+		input = append(input, "-ss", strconv.FormatFloat(startSeconds, 'f', 3, 64))
+	}
 	return Plan{
 		Mode:        ModeTranscode,
 		ContentType: "audio/mpeg",
-		Args: []string{
-			"-hide_banner", "-nostdin",
+		Position:    startSeconds,
+		Args: append(input, []string{
 			"-i", inputPath,
 			"-map", "0:a:0",
 			"-vn", "-sn", "-dn",
@@ -251,7 +261,7 @@ func BuildAudioPlan(inputPath string, bitrate int) (Plan, error) {
 			"-ar", "44100",
 			"-ac", "2",
 			"-f", "mp3", "pipe:1",
-		},
+		}...),
 	}, nil
 }
 
@@ -374,8 +384,9 @@ func parseProbeOutput(data []byte) (Probe, error) {
 			})
 		}
 	}
-	if probe.VideoCodec == "" {
-		return Probe{}, errors.New("media has no video stream")
+	// Audio files often have no cover art, so they only need an audio stream.
+	if probe.VideoCodec == "" && probe.AudioCodec == "" {
+		return Probe{}, errors.New("media has no video or audio stream")
 	}
 	probe.Duration, _ = strconv.ParseFloat(parsed.Format.Duration, 64)
 	return probe, nil
@@ -492,12 +503,21 @@ func (t *Transcoder) Stream(parent context.Context, plan Plan, w http.ResponseWr
 	}
 
 	controller := http.NewResponseController(w)
+	var out io.Writer = w
+	var encrypter *EncryptingWriter
+	if plan.Encrypt != nil {
+		if encrypter, err = NewEncryptingWriter(w, plan.Encrypt.Key, plan.Encrypt.IV); err != nil {
+			_ = cmd.Process.Kill()
+			return finish(err)
+		}
+		out = encrypter
+	}
 	buffer := make([]byte, 64*1024)
 	for {
 		n, readErr := reader.Read(buffer)
 		if n > 0 {
 			_ = controller.SetWriteDeadline(time.Now().Add(writeStall))
-			if _, writeErr := w.Write(buffer[:n]); writeErr != nil {
+			if _, writeErr := out.Write(buffer[:n]); writeErr != nil {
 				_ = cmd.Process.Kill()
 				return finish(writeErr)
 			}
@@ -514,6 +534,11 @@ func (t *Transcoder) Stream(parent context.Context, plan Plan, w http.ResponseWr
 	}
 	if err := wait(); err != nil && ctx.Err() == nil {
 		return fmt.Errorf("ffmpeg failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	if encrypter != nil {
+		if err := encrypter.Close(); err != nil {
+			return finish(err)
+		}
 	}
 	return finish(nil)
 }

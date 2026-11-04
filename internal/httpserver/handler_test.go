@@ -201,6 +201,8 @@ func TestParseAudioBitrateOption(t *testing.T) {
 	}
 }
 
+var denyDirect bool
+
 func createStreamToken(t *testing.T, secret []byte, rootID, relativePath string) string {
 	t.Helper()
 	locator, err := json.Marshal(token.Locator{RootID: rootID, RelativePath: relativePath})
@@ -236,6 +238,7 @@ func createStreamToken(t *testing.T, secret []byte, rootID, relativePath string)
 		IssuedAt:      now,
 		ExpiresAt:     now + 3600,
 		TokenID:       "token-1",
+		Direct:        !denyDirect,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -281,5 +284,27 @@ func TestLyricsPreferStoredCopyOverSidecar(t *testing.T) {
 	}
 	if got := get(); got != "stored" {
 		t.Fatalf("with a stored copy got %q", got)
+	}
+}
+
+func TestStreamRefusesOriginalBytesWithoutDirectClaim(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "song.flac"), []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := media.NewResolver([]media.Root{{ID: "music", Path: root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := []byte("test-secret-that-is-at-least-thirty-two-bytes")
+	handler := NewHandler(Options{Secret: secret, Resolver: resolver, Logger: slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil))})
+
+	denyDirect = true
+	defer func() { denyDirect = false }()
+	request := httptest.NewRequest(http.MethodGet, "/streamer/stream/"+createStreamToken(t, secret, "music", "song.flac"), nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", response.Code, response.Body)
 	}
 }

@@ -261,7 +261,7 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 		return
 	}
-	locator, ok := h.authorize(w, r, "/info/")
+	locator, claims, ok := h.authorizeToken(w, strings.TrimPrefix(r.URL.Path, "/info/"))
 	if !ok {
 		return
 	}
@@ -278,10 +278,18 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if mode == transcode.ModeDirectPlay && !claims.Direct && !isAudioFile(locator.RelativePath) {
+		mode = transcode.ModeRemux
+	}
 	body := map[string]any{
+		"directAllowed":    claims.Direct,
 		"playMethod":       mode,
 		"source":           probe,
 		"availableHeights": availableHeights(probe.Height),
+	}
+	if contentType := audioContentType(locator.RelativePath); contentType != "" {
+		// Lets the player check that its browser can decode the file as-is before choosing to skip transcoding.
+		body["mimeType"] = contentType
 	}
 	// A stream-copy seek begins at the keyframe before the request, so tell the
 	// player where it really starts to keep subtitles in step.
@@ -346,7 +354,7 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 			h.writeError(w, http.StatusInternalServerError, "stream_failed", "Unable to serve media")
 			return
 		}
-		plan, err := transcode.BuildAudioPlan(path, options.AudioBitrateKbps)
+		plan, err := transcode.BuildAudioPlan(path, options.AudioBitrateKbps, options.StartSeconds)
 		if err != nil {
 			h.writeError(w, http.StatusBadRequest, "invalid_options", "Unsupported audio bitrate")
 			return
@@ -361,12 +369,21 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
+		if mode == transcode.ModeDirectPlay && !claims.Direct {
+			// Remux rather than hand over the original bytes.
+			mode = transcode.ModeRemux
+		}
 		if mode != transcode.ModeDirectPlay {
 			h.streamProcessed(w, r, path, probe, mode, options, sessionMeta(r, claims, locator, probe, "progressive"))
 			return
 		}
 	} else if options.Height != 0 || options.StartSeconds != 0 || options.AudioStreamIndex != nil {
 		h.writeError(w, http.StatusNotImplemented, "transcoding_unavailable", "ffmpeg is not available on this streamer")
+		return
+	}
+
+	if !claims.Direct {
+		h.writeError(w, http.StatusForbidden, "original_not_permitted", "Original quality is not available for this account")
 		return
 	}
 

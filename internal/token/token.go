@@ -23,14 +23,16 @@ const (
 )
 
 type Claims struct {
-	Issuer              string   `json:"iss"`
-	Audience            string   `json:"aud"`
-	Subject             string   `json:"sub"`
-	UserID              string   `json:"userId"`
-	MediaItemID         string   `json:"mediaItemId"`
-	MediaSourceID       string   `json:"mediaSourceId"`
-	PlaySessionID       string   `json:"playSessionId"`
-	MediaLocator        string   `json:"mediaLocator"`
+	Issuer        string `json:"iss"`
+	Audience      string `json:"aud"`
+	Subject       string `json:"sub"`
+	UserID        string `json:"userId"`
+	MediaItemID   string `json:"mediaItemId"`
+	MediaSourceID string `json:"mediaSourceId"`
+	PlaySessionID string `json:"playSessionId"`
+	MediaLocator  string `json:"mediaLocator"`
+	// Direct allows serving the original file bytes; without it only transcoded or encrypted output is served.
+	Direct              bool     `json:"direct,omitempty"`
 	AllowedBitrates     []int    `json:"allowedBitrates,omitempty"`
 	AllowedVideoCodecs  []string `json:"allowedVideoCodecs,omitempty"`
 	AllowedAudioCodecs  []string `json:"allowedAudioCodecs,omitempty"`

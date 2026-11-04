@@ -27,6 +27,14 @@ func (h *Handler) handleHLS(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	key := transcode.HLSKey(h.secret, claims.PlaySessionID, claims.MediaItemID)
+	if file == "key" {
+		// The key is only released to a holder of a valid token, so saved segments cannot be decrypted later.
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Cache-Control", "private, no-store")
+		_, _ = w.Write(key)
+		return
+	}
 	if h.transcoder == nil {
 		h.writeError(w, http.StatusNotImplemented, "transcoding_unavailable", "ffmpeg is not available on this streamer")
 		return
@@ -59,7 +67,7 @@ func (h *Handler) handleHLS(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		w.Header().Set("Cache-Control", "private, no-store")
-		_, _ = w.Write([]byte(transcode.BuildPlaylist(probe, query)))
+		_, _ = w.Write([]byte(transcode.BuildPlaylist(probe, query, "key")))
 		return
 	}
 
@@ -70,11 +78,17 @@ func (h *Handler) handleHLS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	options.Encoder = h.transcoder.Settings()
-	plan, err := transcode.BuildSegmentPlan(path, probe, index, options)
+	var plan transcode.Plan
+	if isAudioFile(locator.RelativePath) {
+		plan, err = transcode.BuildAudioSegmentPlan(path, probe, index)
+	} else {
+		plan, err = transcode.BuildSegmentPlan(path, probe, index, options)
+	}
 	if err != nil {
 		h.writeError(w, http.StatusNotFound, "not_found", "Segment is out of range")
 		return
 	}
+	plan.Encrypt = &transcode.Encryption{Key: key, IV: transcode.HLSIV(index)}
 	plan.Meta = sessionMeta(r, claims, locator, probe, "hls")
 	h.finishStream(w, r, plan, transcode.ModeTranscode, "2")
 }

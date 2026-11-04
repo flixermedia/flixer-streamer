@@ -21,11 +21,14 @@ func SegmentCount(probe Probe) int {
 
 // BuildPlaylist renders the VOD playlist. query is appended to each segment URI
 // so the selected height and audio track carry over.
-func BuildPlaylist(probe Probe, query string) string {
+func BuildPlaylist(probe Probe, query, keyURI string) string {
 	count := SegmentCount(probe)
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-PLAYLIST-TYPE:VOD\n")
 	fmt.Fprintf(&b, "#EXT-X-TARGETDURATION:%d\n#EXT-X-MEDIA-SEQUENCE:0\n", SegmentSeconds)
+	if keyURI != "" {
+		fmt.Fprintf(&b, "#EXT-X-KEY:METHOD=AES-128,URI=%q\n", keyURI)
+	}
 	for i := 0; i < count; i++ {
 		length := float64(SegmentSeconds)
 		if i == count-1 {
@@ -37,6 +40,30 @@ func BuildPlaylist(probe Probe, query string) string {
 	}
 	b.WriteString("#EXT-X-ENDLIST\n")
 	return b.String()
+}
+
+// AudioHLSBitrateKbps is the AAC bitrate of encrypted audio segments.
+const AudioHLSBitrateKbps = 256
+
+// BuildAudioSegmentPlan returns ffmpeg arguments that encode one AAC MPEG-TS segment of an audio file.
+func BuildAudioSegmentPlan(inputPath string, probe Probe, index int) (Plan, error) {
+	if index < 0 || index >= SegmentCount(probe) {
+		return Plan{}, ErrInvalidArgs
+	}
+	start := strconv.FormatFloat(float64(index*SegmentSeconds), 'f', 3, 64)
+	return Plan{
+		Mode:        ModeTranscode,
+		ContentType: "video/mp2t",
+		Position:    float64(index * SegmentSeconds),
+		Args: []string{
+			"-hide_banner", "-nostdin",
+			"-ss", start, "-i", inputPath, "-t", strconv.Itoa(SegmentSeconds),
+			"-map", "0:a:0", "-vn", "-sn", "-dn",
+			"-c:a", "aac", "-b:a", strconv.Itoa(AudioHLSBitrateKbps) + "k", "-ar", "44100", "-ac", "2",
+			"-output_ts_offset", start, "-muxdelay", "0",
+			"-f", "mpegts", "pipe:1",
+		},
+	}, nil
 }
 
 // BuildSegmentPlan returns ffmpeg arguments that encode one H.264/AAC MPEG-TS
