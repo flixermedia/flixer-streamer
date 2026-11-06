@@ -75,6 +75,31 @@ func TestBuildPlanTranscodeScalesAndSeeks(t *testing.T) {
 	}
 }
 
+func TestCompatProfilesTranscodeToWebM(t *testing.T) {
+	probe := Probe{VideoCodec: "h264", AudioCodec: "aac", Height: 1080}
+	if got := Decide("in.mp4", probe, Options{Compat: "vp8"}); got != ModeTranscode {
+		t.Fatalf("compat must force a transcode, got %v", got)
+	}
+	for compat, want := range map[string][]string{
+		"vp9": {"libvpx-vp9", "libopus", "webm"},
+		"vp8": {"libvpx", "libvorbis", "webm"},
+	} {
+		plan, err := BuildPlan("in.mp4", probe, ModeTranscode, Options{Compat: compat, Height: 720})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, "scale=-2:720")
+		for _, arg := range want {
+			if !slices.Contains(plan.Args, arg) {
+				t.Fatalf("%s: missing %q in %v", compat, arg, plan.Args)
+			}
+		}
+		if plan.ContentType != "video/webm" || slices.Contains(plan.Args, "aac") {
+			t.Fatalf("%s: unexpected plan %+v", compat, plan)
+		}
+	}
+}
+
 func TestBuildPlanRejectsInvalidOptions(t *testing.T) {
 	if _, err := BuildPlan("in.mkv", Probe{VideoCodec: "h264"}, ModeTranscode, Options{Height: 999}); !errors.Is(err, ErrInvalidArgs) {
 		t.Fatalf("expected ErrInvalidArgs, got %v", err)

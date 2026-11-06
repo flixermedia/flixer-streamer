@@ -220,6 +220,12 @@ func parseOptions(r *http.Request) (transcode.Options, error) {
 		}
 		options.AudioStreamIndex = &index
 	}
+	if value := query.Get("compat"); value != "" {
+		if !transcode.ValidCompat(value) {
+			return options, errors.New("compat must be vp9 or vp8")
+		}
+		options.Compat = value
+	}
 	if value := query.Get("audioBitrate"); value != "" {
 		bitrate, err := strconv.Atoi(value)
 		if err != nil || !transcode.ValidAudioBitrate(bitrate) {

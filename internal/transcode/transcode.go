@@ -85,6 +85,14 @@ type Options struct {
 	AudioStreamIndex *int
 	// Encoder holds the admin's video encoder settings; the zero value means the defaults.
 	Encoder Settings
+	// Compat asks for WebM output a browser without H.264/AAC support can play:
+	// "vp9" (VP9 + Opus) or "vp8" (VP8 + Vorbis). Empty keeps H.264/AAC.
+	Compat string
+}
+
+// ValidCompat reports whether value is an accepted compatibility profile.
+func ValidCompat(value string) bool {
+	return value == "" || value == "vp9" || value == "vp8"
 }
 
 type Plan struct {
@@ -134,6 +142,9 @@ func DirectPlayable(fileName string) bool {
 
 // Decide chooses the delivery mode for a file and the requested options.
 func Decide(fileName string, probe Probe, options Options) Mode {
+	if options.Compat != "" {
+		return ModeTranscode
+	}
 	if needsScaling(probe, options) {
 		return ModeTranscode
 	}
@@ -197,6 +208,10 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 	}
 	args = append(args, "-map", "0:v:0", "-map", audioMap, "-sn", "-dn")
 
+	if options.Compat != "" {
+		return buildCompatPlan(args, probe, mode, options), nil
+	}
+
 	webm := mode == ModeRemux && probe.VideoCodec != "h264"
 	if mode == ModeRemux {
 		args = append(args, "-c:v", "copy")
@@ -231,6 +246,30 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 		"-f", "mp4", "pipe:1",
 	)
 	return Plan{Mode: mode, ContentType: "video/mp4", Args: args, Height: options.Height, Position: options.StartSeconds}, nil
+}
+
+// buildCompatPlan appends a software VP9/Opus or VP8/Vorbis WebM encode, for
+// browsers that cannot decode H.264 or AAC. Encoding is real-time oriented.
+func buildCompatPlan(args []string, probe Probe, mode Mode, options Options) Plan {
+	if filter := compatScale(probe, options); filter != "" {
+		args = append(args, "-vf", filter)
+	}
+	if options.Compat == "vp9" {
+		args = append(args, "-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-row-mt", "1", "-crf", "34", "-b:v", "0", "-pix_fmt", "yuv420p",
+			"-c:a", "libopus", "-b:a", "128k", "-ac", "2")
+	} else {
+		args = append(args, "-c:v", "libvpx", "-deadline", "realtime", "-cpu-used", "8", "-crf", "12", "-b:v", "4M", "-pix_fmt", "yuv420p",
+			"-c:a", "libvorbis", "-b:a", "128k", "-ac", "2")
+	}
+	args = append(args, "-f", "webm", "pipe:1")
+	return Plan{Mode: mode, ContentType: "video/webm", Args: args, Height: options.Height, Position: options.StartSeconds}
+}
+
+func compatScale(probe Probe, options Options) string {
+	if needsScaling(probe, options) {
+		return fmt.Sprintf("scale=-2:%d", options.Height)
+	}
+	return ""
 }
 
 // BuildAudioPlan encodes an audio source as 44.1 kHz stereo MPEG-1 Layer III CBR.
