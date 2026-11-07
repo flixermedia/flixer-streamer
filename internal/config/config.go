@@ -27,7 +27,6 @@ type Config struct {
 	LyricsDir      string
 	AllowedOrigins []string
 	LogLevel       slog.Level
-	LogDir         string
 	FlixerURL      string
 }
 
@@ -110,19 +109,8 @@ func Load() (Config, error) {
 		SubtitleDir:    envOrDefault("SUBTITLE_DIR", filepath.Join(filepath.Dir(envOrDefault("TRICKPLAY_DIR", dataSubdir("cache/trickplay", "/data/cache/trickplay"))), "subtitles")),
 		AllowedOrigins: splitNonEmpty(os.Getenv("ALLOWED_ORIGINS"), ","),
 		LogLevel:       level,
-		LogDir:         logDirectory(),
 		FlixerURL:      strings.TrimRight(envOrDefault("FLIXER_URL", "http://localhost:8083"), "/"),
 	}, nil
-}
-
-func logDirectory() string {
-	if dir := strings.TrimSpace(os.Getenv("LOG_DIR")); dir != "" {
-		return dir
-	}
-	if dir := dataRoot(); dir != "" {
-		return filepath.Join(dir, "logs")
-	}
-	return ""
 }
 
 func (c Config) ListenAddress() string {

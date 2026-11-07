@@ -3,27 +3,22 @@ package main
 import (
 	"context"
 	"errors"
-	"io"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/flixermedia/flixer-logger/pkg/exporter"
 	"github.com/flixermedia/flixer-streamer/internal/config"
 	"github.com/flixermedia/flixer-streamer/internal/flixer"
 	"github.com/flixermedia/flixer-streamer/internal/httpserver"
-	"github.com/flixermedia/flixer-streamer/internal/logfile"
+	"github.com/flixermedia/flixer-streamer/internal/logging"
 	"github.com/flixermedia/flixer-streamer/internal/media"
 	"github.com/flixermedia/flixer-streamer/internal/monitoring"
 	"github.com/flixermedia/flixer-streamer/internal/transcode"
-)
-
-const (
-	logFileMaxBytes = 10 * 1024 * 1024
-	logFileBackups  = 3
 )
 
 func main() {
@@ -33,20 +28,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	var logOutput io.Writer = os.Stdout
-	if cfg.LogDir != "" {
-		file, err := logfile.Open(filepath.Join(cfg.LogDir, "streamer.log"), logFileMaxBytes, logFileBackups)
-		if err != nil {
-			slog.Error("open log file", "error", err)
-			os.Exit(1)
-		}
-		defer file.Close()
-		logOutput = io.MultiWriter(os.Stdout, file)
-	}
-	logger := slog.New(slog.NewJSONHandler(logOutput, &slog.HandlerOptions{
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level:       cfg.LogLevel,
-		ReplaceAttr: logfile.UnifiedAttrs,
+		ReplaceAttr: logging.UnifiedAttrs,
 	})).With("app", "flixer-streamer")
+	exportHandler, logging, logErr := exporter.StartServiceWithControlSocket(logger.Handler(), cfg.FlixerURL, os.Getenv("FLIXER_LOGGER_CONTROL_SOCKET"), "flixer-streamer",
+		func() ([]byte, error) { return []byte(cfg.TokenSecret), nil }, os.Stderr)
+	if logErr != nil {
+		logger.Warn("Flixer Logger export unavailable", "error", logErr)
+	} else {
+		logger = slog.New(exportHandler)
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := logging.Close(ctx); err != nil {
+				fmt.Fprintln(os.Stderr, "Flixer Logger export shutdown:", err)
+			}
+		}()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

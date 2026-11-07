@@ -72,6 +72,26 @@ A passing health check does not issue playback access; `/streamer/stream/{token}
 
 See [`.env.example`](.env.example) for complete options.
 
+### Experimental Flixer Logger export
+
+When Flixer is paired with a logger, the streamer obtains an application-bound
+credential using its existing shared application secret. `FLIXER_URL` must be
+HTTPS or literal loopback HTTP, unless `FLIXER_LOGGER_CONTROL_SOCKET` selects
+Flixer's protected local Unix socket; non-loopback plaintext is deliberately refused.
+The logger endpoint itself also requires HTTPS except on literal loopback.
+Export uses a bounded asynchronous queue and retries, and does not replace
+stdout or Sentry. Streamer no longer writes application-managed log files.
+Events can be dropped on overload, outages, configuration changes or shutdown.
+Changes are polled every five seconds; until the next refresh, events may still
+go to the previous deployment. A shared secret is not a distinct service
+identity. Do not rely on redaction to make logging secrets safe. The bundled
+Compose stack provisions the logger and enrolls Streamer through the protected
+local control socket.
+
+The checked-in `third_party/flixer-logger` snapshot makes independent builds
+possible before the logger module is published. Refresh it from the logger
+repository with `bash scripts/vendor-go-sdk.sh /path/to/flixer-streamer`.
+
 ## 🔌 Endpoints
 
 | Route | Purpose |
