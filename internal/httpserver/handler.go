@@ -95,6 +95,10 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) {
 	case "/stream/", "/stream":
 		h.writeError(w, http.StatusUnauthorized, "invalid_token", "A valid stream token is required")
 	default:
+		if strings.HasPrefix(r.URL.Path, "/trailer/") {
+			h.handleTrailer(w, r)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/live/") {
 			h.handleLive(w, r)
 			return
@@ -171,7 +175,7 @@ func (h *Handler) authorizeToken(w http.ResponseWriter, rawToken string) (token.
 		return token.Locator{}, token.Claims{}, false
 	}
 	locator, err := token.DecryptLocator(claims.MediaLocator, h.secret)
-	if err != nil || locator.IsIPTV() {
+	if err != nil || locator.Type != "" {
 		h.writeError(w, http.StatusUnauthorized, "invalid_token", "A valid stream token is required")
 		return token.Locator{}, token.Claims{}, false
 	}
@@ -222,7 +226,7 @@ func parseOptions(r *http.Request) (transcode.Options, error) {
 	}
 	if value := query.Get("compat"); value != "" {
 		if !transcode.ValidCompat(value) {
-			return options, errors.New("compat must be vp9 or vp8")
+			return options, errors.New("compat must be vp9, vp8 or mp3")
 		}
 		options.Compat = value
 	}

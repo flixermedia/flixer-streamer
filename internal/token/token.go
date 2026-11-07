@@ -168,7 +168,7 @@ func DecryptLocator(encoded string, secret []byte) (Locator, error) {
 		if locator.RootID == "" || locator.RelativePath == "" || locator.URL != "" {
 			return Locator{}, errors.New("media locator is incomplete")
 		}
-	case "iptv":
+	case "iptv", "trailer":
 		if locator.URL == "" || locator.RootID != "" || locator.RelativePath != "" {
 			return Locator{}, errors.New("media locator is incomplete")
 		}
