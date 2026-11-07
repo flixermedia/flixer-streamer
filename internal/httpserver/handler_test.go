@@ -183,6 +183,18 @@ func TestParseAudioTrackOption(t *testing.T) {
 	}
 }
 
+func TestParseCompatOption(t *testing.T) {
+	for _, value := range []string{"mp3", "vp8", "vp9"} {
+		options, err := parseOptions(httptest.NewRequest(http.MethodGet, "/?compat="+value, nil))
+		if err != nil || options.Compat != value {
+			t.Errorf("compat=%s: options = %+v, error = %v", value, options, err)
+		}
+	}
+	if _, err := parseOptions(httptest.NewRequest(http.MethodGet, "/?compat=invalid", nil)); err == nil {
+		t.Fatal("invalid compatibility profile should be rejected")
+	}
+}
+
 func TestParseAudioBitrateOption(t *testing.T) {
 	for _, bitrate := range []int{128, 160, 192, 224, 256, 320} {
 		options, err := parseOptions(httptest.NewRequest(http.MethodGet, "/?audioBitrate="+strconv.Itoa(bitrate), nil))

@@ -86,13 +86,14 @@ type Options struct {
 	// Encoder holds the admin's video encoder settings; the zero value means the defaults.
 	Encoder Settings
 	// Compat asks for WebM output a browser without H.264/AAC support can play:
-	// "vp9" (VP9 + Opus) or "vp8" (VP8 + Vorbis). Empty keeps H.264/AAC.
+	// "vp9" (VP9 + Opus), "vp8" (VP8 + Vorbis), or "mp3" (H.264 + MP3).
+	// Empty keeps H.264/AAC.
 	Compat string
 }
 
 // ValidCompat reports whether value is an accepted compatibility profile.
 func ValidCompat(value string) bool {
-	return value == "" || value == "vp9" || value == "vp8"
+	return value == "" || value == "vp9" || value == "vp8" || value == "mp3"
 }
 
 type Plan struct {
@@ -142,6 +143,12 @@ func DirectPlayable(fileName string) bool {
 
 // Decide chooses the delivery mode for a file and the requested options.
 func Decide(fileName string, probe Probe, options Options) Mode {
+	if options.Compat == "mp3" {
+		if probe.VideoCodec == "h264" && !needsScaling(probe, options) {
+			return ModeRemux
+		}
+		return ModeTranscode
+	}
 	if options.Compat != "" {
 		return ModeTranscode
 	}
@@ -208,7 +215,7 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 	}
 	args = append(args, "-map", "0:v:0", "-map", audioMap, "-sn", "-dn")
 
-	if options.Compat != "" {
+	if options.Compat == "vp8" || options.Compat == "vp9" {
 		return buildCompatPlan(args, probe, mode, options), nil
 	}
 
@@ -236,7 +243,9 @@ func BuildPlan(inputPath string, probe Probe, mode Mode, options Options) (Plan,
 		return Plan{Mode: mode, ContentType: "video/webm", Args: args, Height: options.Height, Position: options.StartSeconds}, nil
 	}
 
-	if audioCodec == "aac" && mode == ModeRemux {
+	if options.Compat == "mp3" {
+		args = append(args, "-c:a", "libmp3lame", "-b:a", "160k", "-ac", "2")
+	} else if audioCodec == "aac" && mode == ModeRemux {
 		args = append(args, "-c:a", "copy")
 	} else {
 		args = append(args, "-c:a", "aac", "-b:a", "160k", "-ac", "2")

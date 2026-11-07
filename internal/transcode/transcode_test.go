@@ -100,6 +100,43 @@ func TestCompatProfilesTranscodeToWebM(t *testing.T) {
 	}
 }
 
+func TestMP3CompatibilityPlan(t *testing.T) {
+	tests := []struct {
+		name    string
+		probe   Probe
+		options Options
+		mode    Mode
+		video   string
+	}{
+		{"copy h264", Probe{VideoCodec: "h264", AudioCodec: "aac", Height: 720}, Options{Compat: "mp3"}, ModeRemux, "copy"},
+		{"scale h264", Probe{VideoCodec: "h264", AudioCodec: "aac", Height: 720}, Options{Compat: "mp3", Height: 480}, ModeTranscode, "libx264"},
+		{"transcode hevc", Probe{VideoCodec: "hevc", AudioCodec: "aac", Height: 720}, Options{Compat: "mp3"}, ModeTranscode, "libx264"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mode := Decide("in.mkv", test.probe, test.options)
+			if mode != test.mode {
+				t.Fatalf("Decide() = %s, want %s", mode, test.mode)
+			}
+			plan, err := BuildPlan("in.mkv", test.probe, mode, test.options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.ContentType != "video/mp4" {
+				t.Fatalf("content type = %s", plan.ContentType)
+			}
+			for _, arg := range []string{test.video, "libmp3lame", "frag_keyframe+empty_moov+default_base_moof"} {
+				if !slices.Contains(plan.Args, arg) {
+					t.Errorf("missing %q in %v", arg, plan.Args)
+				}
+			}
+			if slices.Contains(plan.Args, "aac") {
+				t.Fatalf("AAC must not be used: %v", plan.Args)
+			}
+		})
+	}
+}
+
 func TestBuildPlanRejectsInvalidOptions(t *testing.T) {
 	if _, err := BuildPlan("in.mkv", Probe{VideoCodec: "h264"}, ModeTranscode, Options{Height: 999}); !errors.Is(err, ErrInvalidArgs) {
 		t.Fatalf("expected ErrInvalidArgs, got %v", err)

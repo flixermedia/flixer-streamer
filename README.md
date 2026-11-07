@@ -25,6 +25,7 @@
 - **Direct Play:** HTTP range requests for compatible files.
 - **Direct Stream:** FFmpeg remuxing to fragmented MP4 or WebM.
 - **Transcoding:** H.264/AAC conversion and requested output-height limits.
+- **Browser compatibility:** Optional H.264/MP3, VP8/Vorbis, or VP9/Opus output when AAC playback is unavailable.
 - **Protected playback:** Signed JWTs and encrypted media locators.
 - **IPTV live HLS:** Refreshable playlists and proxied segments with public-address-only upstream validation.
 - **Multiple media roots:** Server-controlled locations and filesystem containment checks.
@@ -77,7 +78,7 @@ See [`.env.example`](.env.example) for complete options.
 | --- | --- |
 | `GET /streamer/healthz` | Service health. |
 | `GET /streamer/info/{token}` | Playback information. |
-| `GET, HEAD /streamer/stream/{token}` | Authorized media delivery; `height` and `start` options. |
+| `GET, HEAD /streamer/stream/{token}` | Authorized media delivery; `height`, `start`, `audioTrack`, and `compat` (`mp3`, `vp8`, or `vp9`) options. |
 | `GET, HEAD /streamer/hls/{token}/...` | Authorized VOD HLS playlist and segments. |
 | `GET /streamer/live/{token}` | Authorized IPTV live HLS playlist; refresh to load current live media. |
 | `GET /streamer/live/{token}/resource/{id}` | Opaque, playlist-issued HLS resource proxy. |
