@@ -581,6 +581,7 @@ func fetchLive(ctx context.Context, rawURL string, headers http.Header) (*http.R
 				if splitErr != nil || !strings.EqualFold(host, allowedHost) || dialPort != port {
 					return nil, errors.New("unexpected upstream dial target")
 				}
+				// Dial the validated addresses directly so a DNS change cannot bypass the public-IP check.
 				dialer := net.Dialer{Timeout: 8 * time.Second}
 				var lastErr error
 				for _, ip := range addresses {

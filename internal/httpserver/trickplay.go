@@ -294,6 +294,7 @@ func readBIFIndex(file *os.File, fileSize int64) (mediaBIFTrickplay, error) {
 		return result, fmt.Errorf("read BIF index: %w", err)
 	}
 	frames := make([]bifFrame, frameCount)
+	// The final index entry is a sentinel at EOF, which supplies the last frame's size.
 	for i := uint32(0); i <= frameCount; i++ {
 		offset := int(i) * bifIndexEntrySize
 		timestamp := binary.LittleEndian.Uint32(table[offset : offset+4])

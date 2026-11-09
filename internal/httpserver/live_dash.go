@@ -128,6 +128,7 @@ func (p *liveProxy) rewriteDASHManifest(
 		}
 	}
 
+	// Replace only URL spans to preserve unrelated XML formatting and content.
 	return applyDASHReplacements(body, replacements)
 }
 
