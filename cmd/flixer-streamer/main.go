@@ -79,6 +79,8 @@ func main() {
 			flixer.SyncTranscoding(ctx, transcoder, cfg.FlixerURL, []byte(cfg.TokenSecret), logger)
 		})
 	}
+	pluginHooks := flixer.NewPluginHooks(cfg.FlixerURL, []byte(cfg.TokenSecret), logger)
+	monitoring.Go(func() { pluginHooks.Sync(ctx) })
 
 	handler := httpserver.NewHandler(httpserver.Options{
 		Secret:         []byte(cfg.TokenSecret),
@@ -88,6 +90,7 @@ func main() {
 		SubtitleDir:    cfg.SubtitleDir,
 		LyricsDir:      cfg.LyricsDir,
 		Transcoder:     transcoder,
+		PluginHooks:    pluginHooks,
 		AllowedOrigins: cfg.AllowedOrigins,
 		Logger:         logger,
 	})

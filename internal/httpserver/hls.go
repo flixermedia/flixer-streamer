@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -23,7 +24,7 @@ func (h *Handler) handleHLS(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusNotFound, "not_found", "Not found")
 		return
 	}
-	locator, claims, ok := h.authorizeToken(w, rawToken)
+	locator, claims, ok := h.authorizeToken(w, r, rawToken)
 	if !ok {
 		return
 	}
@@ -43,6 +44,9 @@ func (h *Handler) handleHLS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_options", err.Error())
 		return
+	}
+	if !isAudioFile(locator.RelativePath) {
+		options = h.pluginOptions(r.Context(), claims, options)
 	}
 	path, probe, _, ok := h.prepare(w, r, locator, options)
 	if !ok {
@@ -67,7 +71,10 @@ func (h *Handler) handleHLS(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		w.Header().Set("Cache-Control", "private, no-store")
-		_, _ = w.Write([]byte(transcode.BuildPlaylist(probe, query, "key")))
+		playlist := transcode.BuildPlaylist(probe, query, "key")
+		result := h.pluginHook(r.Context(), "manifest", claims, options.Height, probe.Duration)
+		playlist = applyManifestStart(playlist, result.StartSeconds, probe.Duration)
+		_, _ = w.Write([]byte(playlist))
 		return
 	}
 
@@ -91,4 +98,11 @@ func (h *Handler) handleHLS(w http.ResponseWriter, r *http.Request) {
 	plan.Encrypt = &transcode.Encryption{Key: key, IV: transcode.HLSIV(index)}
 	plan.Meta = sessionMeta(r, claims, locator, probe, "hls")
 	h.finishStream(w, r, plan, transcode.ModeTranscode, "2")
+}
+
+func applyManifestStart(playlist string, start *float64, duration float64) string {
+	if start == nil || *start < 0 || *start > duration {
+		return playlist
+	}
+	return strings.Replace(playlist, "#EXTM3U\n", fmt.Sprintf("#EXTM3U\n#EXT-X-START:TIME-OFFSET=%.3f,PRECISE=YES\n", *start), 1)
 }

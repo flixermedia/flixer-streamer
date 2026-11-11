@@ -86,6 +86,10 @@ func (h *Handler) handleLive(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusUnauthorized, "invalid_token", "A valid stream token is required")
 		return
 	}
+	if !h.pluginAllows(r.Context(), claims) {
+		h.writeError(w, http.StatusForbidden, "plugin_denied", "Playback is not allowed")
+		return
+	}
 	if !h.live.acquire(r.Context()) {
 		h.writeError(w, http.StatusServiceUnavailable, "upstream_busy", "Live HLS proxy is busy")
 		return

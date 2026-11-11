@@ -77,7 +77,7 @@ func (h *Handler) handleTrickplay(w http.ResponseWriter, r *http.Request) {
 	}
 	remaining := strings.TrimPrefix(r.URL.Path, "/trickplay/")
 	rawToken, name, hasName := strings.Cut(remaining, "/")
-	locator, _, ok := h.authorizeToken(w, rawToken)
+	locator, _, ok := h.authorizeToken(w, r, rawToken)
 	if !ok {
 		return
 	}

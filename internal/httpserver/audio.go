@@ -54,7 +54,7 @@ func (h *Handler) handleLyrics(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 		return
 	}
-	locator, claims, ok := h.authorizeToken(w, strings.TrimPrefix(r.URL.Path, "/lyrics/"))
+	locator, claims, ok := h.authorizeToken(w, r, strings.TrimPrefix(r.URL.Path, "/lyrics/"))
 	if !ok {
 		return
 	}

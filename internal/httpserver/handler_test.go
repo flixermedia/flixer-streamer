@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -18,9 +19,82 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flixermedia/flixer-streamer/internal/flixer"
 	"github.com/flixermedia/flixer-streamer/internal/media"
 	"github.com/flixermedia/flixer-streamer/internal/token"
+	"github.com/flixermedia/flixer-streamer/internal/transcode"
 )
+
+type testPluginHooks struct {
+	result flixer.PluginHookResult
+	err    error
+	calls  int
+}
+
+func (hooks *testPluginHooks) Run(_ context.Context, request flixer.PluginHookRequest) (flixer.PluginHookResult, error) {
+	if request.Hook == "authorize" {
+		hooks.calls++
+	}
+	return hooks.result, hooks.err
+}
+
+func TestPluginAuthorizationCannotBypassCoreAndFailuresFallBack(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "movie.mp4"), []byte("video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := media.NewResolver([]media.Root{{ID: "movies", Path: root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := []byte("test-secret-that-is-at-least-thirty-two-bytes")
+	denied := false
+	hooks := &testPluginHooks{result: flixer.PluginHookResult{Allowed: &denied}}
+	handler := NewHandler(Options{Secret: secret, Resolver: resolver, PluginHooks: hooks})
+	invalid := httptest.NewRecorder()
+	handler.ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, "/streamer/stream/invalid", nil))
+	if invalid.Code != http.StatusUnauthorized || hooks.calls != 0 {
+		t.Fatalf("invalid token status=%d calls=%d", invalid.Code, hooks.calls)
+	}
+	validToken := createStreamToken(t, secret, "movies", "movie.mp4")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/streamer/stream/"+validToken, nil))
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("plugin denial status=%d", response.Code)
+	}
+	hooks.err = context.DeadlineExceeded
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/streamer/stream/"+validToken, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("plugin failure must use core decision, status=%d", response.Code)
+	}
+}
+
+func TestPluginProcessingAndManifestChangesAreBounded(t *testing.T) {
+	height := 720
+	hooks := &testPluginHooks{result: flixer.PluginHookResult{MaxHeight: &height}}
+	handler := &Handler{pluginHooks: hooks, logger: slog.Default()}
+	claims := token.Claims{UserID: "user", MediaItemID: "item", PlaySessionID: "session"}
+	if got := handler.pluginOptions(context.Background(), claims, transcode.Options{Height: 480}).Height; got != 480 {
+		t.Fatalf("plugin raised height: %d", got)
+	}
+	if got := handler.pluginOptions(context.Background(), claims, transcode.Options{Height: 1080}).Height; got != 720 {
+		t.Fatalf("plugin limit not applied: %d", got)
+	}
+	height = 9999
+	if got := handler.pluginOptions(context.Background(), claims, transcode.Options{Height: 1080}).Height; got != 1080 {
+		t.Fatalf("invalid height applied: %d", got)
+	}
+	playlist := "#EXTM3U\n#EXTINF:5,\n0.ts\n"
+	start := 3.0
+	if got := applyManifestStart(playlist, &start, 10); got != "#EXTM3U\n#EXT-X-START:TIME-OFFSET=3.000,PRECISE=YES\n#EXTINF:5,\n0.ts\n" {
+		t.Fatalf("unexpected playlist %q", got)
+	}
+	start = 11
+	if got := applyManifestStart(playlist, &start, 10); got != playlist {
+		t.Fatal("invalid start modified the playlist")
+	}
+}
 
 func TestStreamServesByteRangeWithValidToken(t *testing.T) {
 	root := t.TempDir()

@@ -38,6 +38,10 @@ func (h *Handler) serveTrailer(w http.ResponseWriter, r *http.Request, fetch fun
 		h.writeError(w, http.StatusUnauthorized, "invalid_token", "A valid trailer token is required")
 		return
 	}
+	if !h.pluginAllows(r.Context(), claims) {
+		h.writeError(w, http.StatusForbidden, "plugin_denied", "Playback is not allowed")
+		return
+	}
 	if !h.live.acquire(r.Context()) {
 		h.writeError(w, http.StatusServiceUnavailable, "upstream_busy", "Trailer proxy is busy")
 		return

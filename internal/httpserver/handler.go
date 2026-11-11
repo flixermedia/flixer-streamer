@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flixermedia/flixer-streamer/internal/flixer"
 	"github.com/flixermedia/flixer-streamer/internal/media"
 	"github.com/flixermedia/flixer-streamer/internal/token"
 	"github.com/flixermedia/flixer-streamer/internal/transcode"
@@ -30,6 +32,7 @@ type Options struct {
 	// LyricsDir holds lyrics the indexer downloaded, named <track id>.lrc.
 	LyricsDir      string
 	Transcoder     *transcode.Transcoder
+	PluginHooks    PluginHooks
 	AllowedOrigins []string
 	Logger         *slog.Logger
 }
@@ -42,6 +45,7 @@ type Handler struct {
 	subtitleDir    string
 	lyricsDir      string
 	transcoder     *transcode.Transcoder
+	pluginHooks    PluginHooks
 	live           *liveProxy
 	allowedOrigins map[string]struct{}
 	logger         *slog.Logger
@@ -64,6 +68,7 @@ func NewHandler(options Options) http.Handler {
 		subtitleDir:    options.SubtitleDir,
 		lyricsDir:      options.LyricsDir,
 		transcoder:     options.Transcoder,
+		pluginHooks:    options.PluginHooks,
 		live:           newLiveProxy(),
 		allowedOrigins: origins,
 		logger:         logger,
@@ -160,11 +165,15 @@ func (h *Handler) activeTranscodes() int {
 // authorize validates the token in the URL path after prefix and returns the
 // canonical media path. It writes the error response itself on failure.
 func (h *Handler) authorize(w http.ResponseWriter, r *http.Request, prefix string) (token.Locator, bool) {
-	locator, _, ok := h.authorizeToken(w, strings.TrimPrefix(r.URL.Path, prefix))
+	locator, _, ok := h.authorizeToken(w, r, strings.TrimPrefix(r.URL.Path, prefix))
 	return locator, ok
 }
 
-func (h *Handler) authorizeToken(w http.ResponseWriter, rawToken string) (token.Locator, token.Claims, bool) {
+type PluginHooks interface {
+	Run(context.Context, flixer.PluginHookRequest) (flixer.PluginHookResult, error)
+}
+
+func (h *Handler) authorizeToken(w http.ResponseWriter, r *http.Request, rawToken string) (token.Locator, token.Claims, bool) {
 	if rawToken == "" || strings.Contains(rawToken, "/") {
 		h.writeError(w, http.StatusUnauthorized, "invalid_token", "A valid stream token is required")
 		return token.Locator{}, token.Claims{}, false
@@ -179,7 +188,36 @@ func (h *Handler) authorizeToken(w http.ResponseWriter, rawToken string) (token.
 		h.writeError(w, http.StatusUnauthorized, "invalid_token", "A valid stream token is required")
 		return token.Locator{}, token.Claims{}, false
 	}
+	if !h.pluginAllows(r.Context(), claims) {
+		h.writeError(w, http.StatusForbidden, "plugin_denied", "Playback is not allowed")
+		return token.Locator{}, token.Claims{}, false
+	}
 	return locator, claims, true
+}
+
+func (h *Handler) pluginHook(ctx context.Context, hook string, claims token.Claims, height int, duration float64) flixer.PluginHookResult {
+	if h.pluginHooks == nil {
+		return flixer.PluginHookResult{}
+	}
+	result, err := h.pluginHooks.Run(ctx, flixer.PluginHookRequest{Hook: hook, UserID: claims.UserID, ItemID: claims.MediaItemID, SessionID: claims.PlaySessionID, Height: height, DurationSeconds: duration})
+	if err != nil {
+		h.logger.Warn("streamer plugin hook unavailable; using core behavior", "hook", hook)
+		return flixer.PluginHookResult{}
+	}
+	return result
+}
+
+func (h *Handler) pluginAllows(ctx context.Context, claims token.Claims) bool {
+	result := h.pluginHook(ctx, "authorize", claims, 0, 0)
+	return result.Allowed == nil || *result.Allowed
+}
+
+func (h *Handler) pluginOptions(ctx context.Context, claims token.Claims, options transcode.Options) transcode.Options {
+	result := h.pluginHook(ctx, "processing", claims, options.Height, 0)
+	if result.MaxHeight != nil && *result.MaxHeight > 0 && transcode.ValidHeight(*result.MaxHeight) && (options.Height == 0 || *result.MaxHeight < options.Height) {
+		options.Height = *result.MaxHeight
+	}
+	return options
 }
 
 // sessionMeta describes the playback session for the admin API.
@@ -271,7 +309,7 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed")
 		return
 	}
-	locator, claims, ok := h.authorizeToken(w, strings.TrimPrefix(r.URL.Path, "/info/"))
+	locator, claims, ok := h.authorizeToken(w, r, strings.TrimPrefix(r.URL.Path, "/info/"))
 	if !ok {
 		return
 	}
@@ -283,6 +321,9 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_options", err.Error())
 		return
+	}
+	if !isAudioFile(locator.RelativePath) {
+		options = h.pluginOptions(r.Context(), claims, options)
 	}
 	_, probe, mode, ok := h.prepare(w, r, locator, options)
 	if !ok {
@@ -335,7 +376,7 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rawToken := strings.TrimPrefix(r.URL.Path, "/stream/")
-	locator, claims, ok := h.authorizeToken(w, rawToken)
+	locator, claims, ok := h.authorizeToken(w, r, rawToken)
 	if !ok {
 		return
 	}
@@ -343,6 +384,9 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid_options", err.Error())
 		return
+	}
+	if !isAudioFile(locator.RelativePath) {
+		options = h.pluginOptions(r.Context(), claims, options)
 	}
 
 	if options.AudioBitrateKbps != 0 {
