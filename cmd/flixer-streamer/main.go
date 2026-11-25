@@ -89,10 +89,11 @@ func main() {
 		TrickplayDir:   cfg.TrickplayDir,
 		SubtitleDir:    cfg.SubtitleDir,
 		LyricsDir:      cfg.LyricsDir,
-		Transcoder:     transcoder,
-		PluginHooks:    pluginHooks,
-		AllowedOrigins: cfg.AllowedOrigins,
-		Logger:         logger,
+		Transcoder:         transcoder,
+		PluginHooks:        pluginHooks,
+		PermissionReporter: flixer.NewPermissionReporter(cfg.FlixerURL, []byte(cfg.TokenSecret), logger),
+		AllowedOrigins:     cfg.AllowedOrigins,
+		Logger:             logger,
 	})
 	var rootHandler http.Handler = handler
 	if sentryEnabled {

@@ -31,24 +31,26 @@ type Options struct {
 	SubtitleDir string
 	// LyricsDir holds lyrics the indexer downloaded, named <track id>.lrc.
 	LyricsDir      string
-	Transcoder     *transcode.Transcoder
-	PluginHooks    PluginHooks
-	AllowedOrigins []string
-	Logger         *slog.Logger
+	Transcoder         *transcode.Transcoder
+	PluginHooks        PluginHooks
+	PermissionReporter *flixer.PermissionReporter
+	AllowedOrigins     []string
+	Logger             *slog.Logger
 }
 
 type Handler struct {
-	secret         []byte
-	resolver       *media.Resolver
-	transcodeDir   string
-	trickplayDir   string
-	subtitleDir    string
-	lyricsDir      string
-	transcoder     *transcode.Transcoder
-	pluginHooks    PluginHooks
-	live           *liveProxy
-	allowedOrigins map[string]struct{}
-	logger         *slog.Logger
+	secret             []byte
+	resolver           *media.Resolver
+	transcodeDir       string
+	trickplayDir       string
+	subtitleDir        string
+	lyricsDir          string
+	transcoder         *transcode.Transcoder
+	pluginHooks        PluginHooks
+	permissionReporter *flixer.PermissionReporter
+	live               *liveProxy
+	allowedOrigins     map[string]struct{}
+	logger             *slog.Logger
 }
 
 func NewHandler(options Options) http.Handler {
@@ -67,13 +69,25 @@ func NewHandler(options Options) http.Handler {
 		trickplayDir:   options.TrickplayDir,
 		subtitleDir:    options.SubtitleDir,
 		lyricsDir:      options.LyricsDir,
-		transcoder:     options.Transcoder,
-		pluginHooks:    options.PluginHooks,
-		live:           newLiveProxy(),
+		transcoder:         options.Transcoder,
+		pluginHooks:        options.PluginHooks,
+		permissionReporter: options.PermissionReporter,
+		live:               newLiveProxy(),
 		allowedOrigins: origins,
 		logger:         logger,
 	}
 	return h.withLogging(http.HandlerFunc(h.route))
+}
+
+func (h *Handler) reportPermission(operation, path string, err error) {
+	if h.permissionReporter == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		h.permissionReporter.Report(ctx, operation, path, err)
+	}()
 }
 
 func (h *Handler) route(w http.ResponseWriter, r *http.Request) {
@@ -287,6 +301,7 @@ func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, locator token.
 	}
 	if errors.Is(err, os.ErrPermission) {
 		h.logger.Error("resolve media permission denied", "error", err)
+		h.reportPermission("resolve", locator.RelativePath, err)
 		h.writeError(w, http.StatusForbidden, "media_permission_denied", "The streamer does not have permission to read this media file")
 		return
 	}
@@ -300,6 +315,7 @@ func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, locator token.
 		if file, openErr := os.Open(path); openErr != nil {
 			if errors.Is(openErr, os.ErrPermission) {
 				h.logger.Error("probe media permission denied", "error", openErr)
+				h.reportPermission("probe", path, openErr)
 				h.writeError(w, http.StatusForbidden, "media_permission_denied", "The streamer does not have permission to read this media file")
 				return
 			}
