@@ -108,7 +108,12 @@ func (h *Handler) storedSubtitleDir(locator token.Locator) string {
 	if h.subtitleDir == "" {
 		return ""
 	}
-	return filepath.Join(h.subtitleDir, trickplayKey(locator))
+	key := trickplayKey(locator)
+	nested := filepath.Join(h.subtitleDir, key, "subtitles")
+	if _, err := os.Stat(nested); err == nil {
+		return nested
+	}
+	return filepath.Join(h.subtitleDir, key)
 }
 
 func (h *Handler) serveSubtitle(w http.ResponseWriter, locator token.Locator, prefix, file string) {

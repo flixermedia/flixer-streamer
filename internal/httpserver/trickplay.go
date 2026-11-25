@@ -85,7 +85,14 @@ func (h *Handler) handleTrickplay(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusNotFound, "trickplay_not_available", "Trickplay is not available")
 		return
 	}
-	keyDir := filepath.Join(h.trickplayDir, trickplayKey(locator))
+	key := trickplayKey(locator)
+	keyDir := filepath.Join(h.trickplayDir, key, "trickplay")
+	if _, err := os.Stat(keyDir); errors.Is(err, os.ErrNotExist) {
+		legacy := filepath.Join(h.trickplayDir, key)
+		if _, legacyErr := os.Stat(filepath.Join(legacy, "index.json")); legacyErr == nil {
+			keyDir = legacy
+		}
+	}
 	if name == "tiles.m3u8" {
 		if _, err := readTrickplayIndex(keyDir); err == nil {
 			h.serveTrickplayPlaylist(w, r, keyDir, "")

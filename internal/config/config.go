@@ -96,7 +96,7 @@ func Load() (Config, error) {
 		return Config{}, errors.New("FFMPEG_LOG_LEVEL must be one of quiet, panic, fatal, error, warning, info, verbose, debug, trace")
 	}
 
-	trickplayDir := envOrDefault("TRICKPLAY_DIR", dataSubdir("cache/trickplay", "/data/cache/trickplay"))
+	trickplayDir := envOrDefault("TRICKPLAY_DIR", dataSubdir("cache/library", "/data/cache/library"))
 	return Config{
 		Port:           port,
 		TokenSecret:    secret,
@@ -106,8 +106,8 @@ func Load() (Config, error) {
 		MaxTranscodes:  maxTranscodes,
 		TranscodeDir:   envOrDefault("TRANSCODE_DIR", dataSubdir("cache/transcode", "./cache/transcode")),
 		TrickplayDir:   trickplayDir,
-		LyricsDir:      envOrDefault("LYRICS_PATH", dataSubdir("cache/lyrics", "./cache/lyrics")),
-		SubtitleDir:    envOrDefault("SUBTITLE_DIR", filepath.Join(filepath.Dir(trickplayDir), "subtitles")),
+		LyricsDir:      envOrDefault("LYRICS_PATH", dataSubdir("cache/library/lyrics", "./cache/library/lyrics")),
+		SubtitleDir:    envOrDefault("SUBTITLE_DIR", trickplayDir),
 		AllowedOrigins: splitNonEmpty(os.Getenv("ALLOWED_ORIGINS"), ","),
 		LogLevel:       level,
 		FlixerURL:      strings.TrimRight(envOrDefault("FLIXER_URL", "http://localhost:8083"), "/"),
