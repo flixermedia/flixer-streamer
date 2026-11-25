@@ -285,6 +285,11 @@ func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, locator token.
 		h.writeError(w, http.StatusNotFound, "media_not_found", "Media is not available")
 		return
 	}
+	if errors.Is(err, os.ErrPermission) {
+		h.logger.Error("resolve media permission denied", "error", err)
+		h.writeError(w, http.StatusForbidden, "media_permission_denied", "The streamer does not have permission to read this media file")
+		return
+	}
 	if err != nil {
 		h.logger.Error("resolve media failed", "error", err)
 		h.writeError(w, http.StatusInternalServerError, "stream_failed", "Unable to serve media")
@@ -292,6 +297,19 @@ func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, locator token.
 	}
 	probe, err = h.transcoder.Probe(r.Context(), path)
 	if err != nil {
+		if file, openErr := os.Open(path); openErr != nil {
+			if errors.Is(openErr, os.ErrPermission) {
+				h.logger.Error("probe media permission denied", "error", openErr)
+				h.writeError(w, http.StatusForbidden, "media_permission_denied", "The streamer does not have permission to read this media file")
+				return
+			}
+			if errors.Is(openErr, os.ErrNotExist) {
+				h.writeError(w, http.StatusNotFound, "media_not_found", "Media is not available")
+				return
+			}
+		} else {
+			_ = file.Close()
+		}
 		h.logger.Error("probe media failed", "error", err)
 		h.writeError(w, http.StatusInternalServerError, "stream_failed", "Unable to inspect media")
 		return
