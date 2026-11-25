@@ -13,7 +13,8 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpat
 FROM alpine:3.22 AS runtime
 ARG APP_VERSION=dev
 RUN apk add --no-cache ca-certificates curl ffmpeg \
-    && adduser -D -H -u 65532 streamer \
+    && addgroup -g 1000 streamer \
+    && adduser -D -H -u 1000 -G streamer streamer \
     && mkdir -p /var/cache/flixer/transcode \
     && chown -R streamer:streamer /var/cache/flixer
 
